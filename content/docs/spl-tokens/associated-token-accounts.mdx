@@ -30,7 +30,7 @@ The `associated_token::mint` and `associated_token::authority` attributes trigge
 
 ## Address derivation
 
-The `quasar-spl` crate exports several address derivation functions. On-chain, these use an optimized path through `sol_sha256` and `sol_curve_validate_point` at roughly 544 CU, compared to the standard `find_program_address` syscall at roughly 1,500 CU.
+The `quasar-spl` crate exports several address derivation functions for computing ATA addresses both on-chain and off-chain.
 
 ### Runtime derivation
 

@@ -112,7 +112,7 @@ pub enum TestError {
 }
 ```
 
-The convention is to start at 6000 for Anchor compatibility, but any `u32` value is valid.
+Any `u32` value is valid. A common convention is to start at 6000.
 
 ### Using program errors
 
@@ -270,7 +270,7 @@ This allows TypeScript clients, for example, to catch a `ProgramError::Custom(60
 
 ## Best practices
 
-1. **Start program errors at 6000** for compatibility with Anchor clients and error decoders that expect this convention.
+1. **Start program errors at 6000** for compatibility with common Solana error decoders that expect this convention.
 
 2. **Use doc comments** on error variants. These become the user-facing error messages in the IDL:
 

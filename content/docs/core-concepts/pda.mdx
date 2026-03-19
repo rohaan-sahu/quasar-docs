@@ -3,39 +3,7 @@ title: Program Derived Addresses
 description: Using PDAs for deterministic account addressing in Quasar — optimized derivation, seed expressions, bump capture, and PDA signing.
 ---
 
-Quasar provides an optimized PDA implementation that reduces derivation cost from ~1,500 CU (standard SDK syscalls) to ~544 CU by calling `sol_sha256` and `sol_curve_validate_point` directly.
-
-## Implementation Details
-
-The standard SDK uses `sol_create_program_address` and `sol_try_find_program_address` syscalls (~1,500 CU per derivation). Quasar calls `sol_sha256` and `sol_curve_validate_point` directly:
-
-1. **`sol_sha256`** -- hashes `[seeds..., bump, program_id, "ProgramDerivedAddress"]` in a single call.
-2. **`sol_curve_validate_point`** -- checks whether the hash is on the ed25519 curve (CURVE25519_EDWARDS = 0). Non-zero return means off-curve (valid PDA).
-
-Cost: ~544 CU when bump 255 succeeds on the first attempt.
-
-Micro-optimizations:
-- **Stack-allocated seed array**: `MaybeUninit<[&[u8]; 19]>` holds up to 16 seeds + bump + program_id + PDA marker.
-- **Single-byte bump mutation**: Only the bump byte is updated per iteration, not the entire seed array.
-- **u64 loop counter**: Avoids per-iteration zero-extension on SBF.
-- **Slice layout exploit**: On SBF, `&[u8]` has layout `(*const u8, u64)` = `SolBytes`, so the slice-of-slices passes directly to the syscall without copies.
-
-### Compile-Time Derivation
-
-For seeds known at compile time (e.g., the event authority PDA), `find_program_address_const` uses `const_crypto::ed25519::derive_program_address`:
-
-```rust
-pub const fn find_program_address_const(
-    seeds: &[&[u8]], program_id: &Address
-) -> (Address, u8) {
-    let (bytes, bump) = const_crypto::ed25519::derive_program_address(
-        seeds, program_id.as_array()
-    );
-    (Address::new_from_array(bytes), bump)
-}
-```
-
-The `#[program]` macro uses this to derive `EventAuthority::ADDRESS` and `EventAuthority::BUMP` at compile time -- zero runtime cost.
+Quasar provides optimized PDA derivation and a declarative syntax for seed validation, bump discovery, and PDA signing in CPI.
 
 ## Seeds in Account Validation
 
@@ -73,7 +41,7 @@ pub struct Make<'info> {
 }
 ```
 
-The generated code calls `based_try_find_program_address`, iterating from bump 255 downward. Most PDAs succeed on the first attempt (~544 CU). The discovered bump is stored in the `Bumps` struct.
+The generated code iterates from bump 255 downward until it finds a valid PDA. The discovered bump is stored in the `Bumps` struct.
 
 ### Seed Expressions
 
