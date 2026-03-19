@@ -42,7 +42,7 @@ framework = "quasarsvm-rust"
 
 ### Cargo.toml
 
-Standard Rust crate with `crate-type = ["cdylib"]` so it compiles to a shared object the Solana runtime can load:
+`crate-type = ["cdylib"]` compiles the program to a shared object the Solana runtime can load:
 
 ```toml
 [package]
@@ -68,7 +68,7 @@ debug = []
 quasar-lang = { git = "https://github.com/blueshift-gg/quasar" }
 ```
 
-Feature flags: `debug` enables verbose error logging on-chain (account name and index in constraint failures); `client` enables the off-chain instruction builder module; `alloc` enables heap allocation for programs that need it.
+Feature flags: `debug` enables verbose constraint failure messages on-chain, `client` enables the off-chain instruction builder module, `alloc` enables heap allocation.
 
 ### src/lib.rs
 
@@ -97,9 +97,9 @@ mod my_program {
 
 - **`#![cfg_attr(not(test), no_std)]`** -- `no_std` on-chain, `std` during tests.
 - **`declare_id!`** -- Program's on-chain address. The CLI generates a keypair in `target/deploy/` and embeds the public key here.
-- **`#[program]`** -- Generates the dispatch table, entrypoint function, and (for off-chain targets) a client module.
-- **`#[instruction(discriminator = 0)]`** -- Each instruction gets an explicit discriminator. Accepts a single integer (`discriminator = 0`) or a byte array (`discriminator = [1, 0, 0, 0]`). Discriminators must be unique within a program. The dispatch table matches on these bytes.
-- **`Ctx<Initialize>`** -- Typed context containing the parsed and validated `Initialize` accounts struct plus PDA bumps.
+- **`#[program]`** -- Generates the dispatch table, entrypoint, and (off-chain) a client module.
+- **`#[instruction(discriminator = 0)]`** -- Each instruction gets an explicit discriminator. Accepts a single integer (`discriminator = 0`) or a byte array (`discriminator = [1, 0, 0, 0]`). Must be unique within a program.
+- **`Ctx<Initialize>`** -- Typed context containing the validated `Initialize` accounts struct and PDA bumps.
 
 ### src/instructions/initialize.rs
 
@@ -120,10 +120,10 @@ impl<'info> Initialize<'info> {
 }
 ```
 
-- **`#[derive(Accounts)]`** -- Generates parsing and validation. Each field is a typed account reference with automatic checks (signer, ownership, mutability).
-- **`&'info mut Signer`** -- Mutable reference to a signer. `mut` = writable; `Signer` = requires signature.
+- **`#[derive(Accounts)]`** -- Generates parsing and validation. Each field is a typed account reference with automatic signer, ownership, and mutability checks.
+- **`&'info mut Signer`** -- Mutable reference to a signer. `mut` means writable; `Signer` requires a signature.
 - **`&'info Program<System>`** -- Reference to the System program, validated by address.
-- **The `impl` block** -- Business logic. Accounts are parsed and validated before your code runs.
+- **The `impl` block** -- Business logic. Accounts are already parsed and validated before your code runs.
 
 ### Generated keypair
 
@@ -183,7 +183,7 @@ The discriminator auto-increments from the highest existing value in the `#[prog
 quasar build
 ```
 
-Invokes `cargo build-sbf` (Solana toolchain) or `cargo +nightly build-bpf` (upstream) based on `Quasar.toml`. Also generates the IDL and client code in `target/`.
+Runs the build command from `Quasar.toml` and generates the IDL and client code in `target/`.
 
 Output: `target/deploy/my_program.so`.
 
@@ -199,7 +199,7 @@ quasar build --debug
 quasar test
 ```
 
-Builds the program first (unless `--no-build` is passed), then runs the test suite. Rust frameworks (Mollusk, QuasarSVM/Rust) use `cargo test`; TypeScript frameworks (QuasarSVM/Web3.js, QuasarSVM/Kit) use the TypeScript test runner.
+Builds the program first (unless `--no-build` is passed), then runs the test suite.
 
 Filter by name:
 
@@ -245,11 +245,11 @@ pub struct InitializeEvent {
 
 For a full program with state, events, and multiple instructions, see [Build a Vault](/docs/guides/build-a-vault).
 
-## What's next
+## Next steps
 
-- **[Core Concepts](/docs/core-concepts)** -- Understand how zero-copy accounts, discriminators, and the dispatch model work under the hood.
-- **[Account Constraints](/docs/references/account-constraints)** -- Learn about `seeds`, `has_one`, `constraint`, `init`, `close`, and other account attributes.
+- **[Core Concepts](/docs/core-concepts)** -- Zero-copy accounts, discriminators, and dispatch.
+- **[Account Constraints](/docs/references/account-constraints)** -- `seeds`, `has_one`, `constraint`, `init`, `close`, and more.
 - **[Events](/docs/features/events)** -- Emit on-chain events with `emit!()` and `emit_cpi!()`.
-- **[Error Handling](/docs/features/error-handling)** -- Define custom errors with `#[error_code]`.
-- **[Build an Escrow](/docs/guides/build-an-escrow)** -- A full end-to-end tutorial with token CPIs, PDAs, and events.
-- **[Migrating from Anchor](./migrating-from-anchor)** -- If you are coming from Anchor, this guide maps every concept to its Quasar equivalent.
+- **[Error Handling](/docs/features/error-handling)** -- Custom errors with `#[error_code]`.
+- **[Build an Escrow](/docs/guides/build-an-escrow)** -- Full tutorial with token CPIs, PDAs, and events.
+- **[Migrating from Anchor](./migrating-from-anchor)** -- Maps every Anchor concept to its Quasar equivalent.

@@ -3,11 +3,11 @@ title: Configuration
 description: Quasar.toml project configuration and global config reference.
 ---
 
-Quasar uses two configuration files: a per-project `Quasar.toml` at the project root, and a global `~/.quasar/config.toml` for user preferences that apply across all projects.
+Quasar uses two configuration files: a per-project `Quasar.toml` at the project root, and a global `~/.quasar/config.toml` for user preferences.
 
 ## Project Configuration (`Quasar.toml`)
 
-Every Quasar project has a `Quasar.toml` file at the root, created by `quasar init`. This file is read by `quasar build`, `quasar test`, and other project-aware commands.
+Created by `quasar init` and read by `quasar build`, `quasar test`, and other project-aware commands.
 
 ### Full Schema
 
@@ -94,7 +94,7 @@ framework = "quasarsvm-rust"
 
 ## Global Configuration (`~/.quasar/config.toml`)
 
-User preferences that apply across all projects. Created automatically when you run `quasar init` or `quasar config set`. Managed via the `quasar config` command.
+User preferences across all projects. Created when you run `quasar init` or `quasar config set`.
 
 **Location:** `~/.quasar/config.toml`
 
@@ -136,25 +136,22 @@ Controls CLI output behavior.
 
 ---
 
-## Configuration Precedence
+## Precedence
 
-When both project and global configs exist:
-
-1. **Project config (`Quasar.toml`)** is always authoritative for build and test behavior. The `toolchain.type` and `testing.framework` fields in `Quasar.toml` determine how `quasar build` and `quasar test` operate.
-
-2. **Global config (`~/.quasar/config.toml`)** provides defaults for project scaffolding (`quasar init`) and UI preferences. Global defaults do not override `Quasar.toml` settings in an existing project.
+1. **Project config (`Quasar.toml`)** is authoritative for build and test behavior.
+2. **Global config (`~/.quasar/config.toml`)** provides defaults for `quasar init` and UI preferences. Global defaults do not override project settings.
 
 ---
 
-## Managing Configuration
+## Managing configuration
 
-### `quasar config` (interactive)
+### `quasar config`
 
-Running `quasar config` without a subcommand opens an interactive menu for editing all global settings.
+Without a subcommand, opens an interactive menu.
 
 ### `quasar config get <KEY>`
 
-Read a single config value.
+Read a config value.
 
 ```bash
 $ quasar config get ui.animation
@@ -166,7 +163,7 @@ solana
 
 ### `quasar config set <KEY> <VALUE>`
 
-Write a config value. Invalid values are rejected with an error message showing valid options.
+Write a config value. Invalid values are rejected with valid options shown.
 
 ```bash
 $ quasar config set ui.color false
@@ -190,7 +187,7 @@ $ quasar config set defaults.toolchain none
 
 ### `quasar config list`
 
-Print all config values and the config file path.
+Print all config values and the file path.
 
 ```bash
 $ quasar config list
@@ -209,7 +206,7 @@ $ quasar config list
 
 ### `quasar config reset`
 
-Restore factory defaults. Preserves the `animation = false` setting if it was previously disabled (to avoid replaying the init animation).
+Restore factory defaults. Preserves `animation = false` if previously disabled.
 
 ```bash
 $ quasar config reset
@@ -218,7 +215,7 @@ $ quasar config reset
 
 ---
 
-## All Config Keys
+## All config keys
 
 | Key | Scope | Type | Valid Values |
 |-----|-------|------|-------------|

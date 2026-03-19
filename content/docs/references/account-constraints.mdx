@@ -1,9 +1,9 @@
 ---
 title: Account Constraints
-description: Complete reference for all #[account(...)] constraint attributes in Quasar.
+description: Reference for all #[account(...)] constraint attributes in Quasar.
 ---
 
-Account constraints are specified as attributes on fields within a `#[derive(Accounts)]` struct using the `#[account(...)]` syntax. They generate compile-time validation code that runs during account parsing.
+Account constraints are attributes on fields in a `#[derive(Accounts)]` struct. They generate validation code that runs during account parsing.
 
 ```rust
 #[derive(Accounts)]
@@ -16,7 +16,7 @@ pub struct MyInstruction<'info> {
 
 ## Custom Errors
 
-The `has_one`, `constraint`, and `address` attributes support custom error codes using the `@` syntax:
+`has_one`, `constraint`, and `address` support custom error codes with `@`:
 
 ```rust
 #[account(
@@ -34,7 +34,7 @@ Without `@`, these attributes use their default errors (`HasOneMismatch`, `Const
 
 ### `mut`
 
-Marks the account as mutable. Generates a runtime check that the account was passed as writable in the transaction.
+Marks the account as mutable. Checks that the account was passed as writable.
 
 | | |
 |---|---|
@@ -49,7 +49,7 @@ pub vault: &'info mut Account<Vault>,
 
 ### `dup`
 
-Allows this account to share the same address as a previous account in the struct. By default, Quasar rejects duplicate accounts to prevent aliasing bugs. Use `dup` when intentional duplication is needed.
+Allows this account to share the same address as a previous account in the struct. By default, duplicate accounts are rejected. Use `dup` when intentional duplication is needed.
 
 | | |
 |---|---|
@@ -68,7 +68,7 @@ pub struct SelfTransfer<'info> {
 
 ### `address = <expr>`
 
-Validates that the account's address matches a constant or expression. Supports custom errors with `@`.
+Validates that the account's address matches a constant or expression.
 
 | | |
 |---|---|
@@ -85,7 +85,7 @@ pub admin: &'info Signer,
 
 ### `has_one = <field>`
 
-Validates that a field stored in the account data matches the address of another account in the struct. The account type must have a field with the same name as the referenced account.
+Validates that a stored address field matches another account in the struct. The account type must have a field with the same name as the referenced account.
 
 | | |
 |---|---|
@@ -117,7 +117,7 @@ Multiple `has_one` checks can be specified on the same field:
 
 ### `constraint = <expr>`
 
-Evaluates an arbitrary boolean expression. If the expression returns `false`, the instruction fails. Supports custom errors with `@`.
+Evaluates a boolean expression. If it returns `false`, the instruction fails.
 
 | | |
 |---|---|
@@ -146,11 +146,7 @@ Multiple constraints can be specified:
 
 ### `init`
 
-Creates a new account via CPI to the System program. Automatically:
-1. Derives the account size from `T::SPACE` (or `space = <expr>`)
-2. Calculates rent-exempt lamports
-3. Calls `create_account` CPI
-4. Writes the discriminator bytes
+Creates a new account via System program CPI. Derives size from `T::SPACE` (or `space = <expr>`), calculates rent-exempt lamports, and writes the discriminator.
 
 | | |
 |---|---|
@@ -178,7 +174,7 @@ pub vault: &'info mut Account<Vault>,
 
 ### `init_if_needed`
 
-Like `init`, but skips creation if the account already exists (discriminator is set). If the account is uninitialized (all zeros), it creates and initializes it.
+Like `init`, but skips creation if the account already exists. Creates and initializes only if the account is uninitialized (all zeros).
 
 | | |
 |---|---|
@@ -192,7 +188,7 @@ pub profile: &'info mut Account<Profile>,
 
 ### `payer = <field>`
 
-Specifies which signer account pays for account creation. Must reference another field in the accounts struct.
+Specifies which signer pays for account creation.
 
 | | |
 |---|---|
@@ -219,7 +215,7 @@ pub profile: &'info mut Account<Profile>,
 
 ### `seeds = [...]`
 
-Specifies the seeds used to derive a PDA. When combined with `bump`, the framework verifies that the account address matches the derived PDA.
+Seeds used to derive a PDA. Combined with `bump`, verifies the account address matches the derived PDA.
 
 | | |
 |---|---|
@@ -266,11 +262,7 @@ This is more CU-efficient since it skips the bump search.
 
 ### `close = <destination>`
 
-Closes the account after the instruction executes:
-1. Zeros the discriminator bytes
-2. Drains all lamports to the destination account
-3. Reassigns ownership to the System program
-4. Resizes account data to zero
+Closes the account after the instruction executes. Zeros the discriminator, drains lamports to the destination, and reassigns ownership to the System program.
 
 | | |
 |---|---|
@@ -289,7 +281,7 @@ pub struct CloseVault<'info> {
 
 ### `realloc = <expr>`
 
-Resizes the account data to a new size, adjusting lamports for rent exemption. If growing, the payer provides additional lamports. If shrinking, excess lamports are returned to the payer.
+Resizes account data, adjusting lamports for rent exemption. Growing takes lamports from the payer; shrinking returns excess.
 
 | | |
 |---|---|
@@ -303,7 +295,7 @@ pub vault: &'info mut Account<Vault>,
 
 ### `realloc::payer = <field>`
 
-Specifies the account that pays for (or receives excess from) reallocation.
+Account that pays for (or receives excess from) reallocation.
 
 | | |
 |---|---|
@@ -314,7 +306,7 @@ Specifies the account that pays for (or receives excess from) reallocation.
 
 ## SPL Token Constraints
 
-These attributes are used with `init` or `init_if_needed` to initialize a token account with specific mint and authority. Both `token::mint` and `token::authority` must be specified together.
+Used with `init` or `init_if_needed` to initialize a token account. `token::mint` and `token::authority` must be specified together.
 
 ### `token::mint = <field>`
 
@@ -352,7 +344,7 @@ pub struct InitTokenAccount<'info> {
 
 ## SPL Mint Constraints
 
-These attributes are used with `init` to initialize a new mint account.
+Used with `init` to initialize a new mint account.
 
 ### `mint::decimals = <expr>`
 
@@ -401,11 +393,11 @@ pub struct CreateMint<'info> {
 
 ## Associated Token Account (ATA) Constraints
 
-These attributes handle associated token account creation and validation.
+Create and validate associated token accounts.
 
 ### `associated_token::mint = <field>`
 
-Specifies the mint for ATA address derivation and validation.
+Mint for ATA address derivation and validation.
 
 | | |
 |---|---|
@@ -413,7 +405,7 @@ Specifies the mint for ATA address derivation and validation.
 
 ### `associated_token::authority = <field>`
 
-Specifies the authority (wallet) for ATA address derivation and validation.
+Authority (wallet) for ATA address derivation and validation.
 
 | | |
 |---|---|
@@ -421,7 +413,7 @@ Specifies the authority (wallet) for ATA address derivation and validation.
 
 ### `associated_token::token_program = <field>`
 
-Specifies the token program for ATA derivation (needed when using Token-2022).
+Token program for ATA derivation (needed for Token-2022).
 
 | | |
 |---|---|
@@ -452,7 +444,7 @@ pub struct InitAta<'info> {
 
 ## Metadata Constraints
 
-These attributes are used with `init` to create Metaplex metadata and master edition accounts.
+Used with `init` to create Metaplex metadata and master edition accounts.
 
 ### `metadata::name = <expr>`
 
@@ -517,7 +509,7 @@ pub struct CreateNft<'info> {
 
 ---
 
-## Complete Attribute Reference
+## Quick reference
 
 | Attribute | Syntax | Default Error |
 |-----------|--------|---------------|

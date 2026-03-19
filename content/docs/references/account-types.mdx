@@ -1,11 +1,11 @@
 ---
 title: Account Types
-description: Exhaustive reference for all built-in account types in Quasar.
+description: Reference for all built-in account types in Quasar.
 ---
 
-Quasar provides a set of account wrapper types that validate on-chain accounts during instruction parsing. Every field in a `#[derive(Accounts)]` struct must use one of these types. All types are `#[repr(transparent)]` over `AccountView`, enabling zero-cost pointer-cast construction.
+Every field in a `#[derive(Accounts)]` struct must use one of these wrapper types. Each validates the account during instruction parsing.
 
-## Summary Table
+## Summary
 
 | Type | Validates | Typical Use |
 |------|-----------|-------------|
@@ -21,14 +21,14 @@ Quasar provides a set of account wrapper types that validate on-chain accounts d
 
 ## `Account<T>`
 
-A typed, validated wrapper for program-owned data accounts. `T` is your `#[account]` struct.
+Typed wrapper for program-owned data accounts. `T` is your `#[account]` struct.
 
 **Validates:**
-- Account owner matches `T::OWNER` (your program ID) -- returns `IllegalOwner`
-- Discriminator bytes match `T::DISCRIMINATOR` -- returns `InvalidAccountData`
-- Account data is large enough for the type -- returns `AccountDataTooSmall`
+- Owner matches `T::OWNER` (your program ID) -- returns `IllegalOwner`
+- Discriminator matches `T::DISCRIMINATOR` -- returns `InvalidAccountData`
+- Data is large enough for the type -- returns `AccountDataTooSmall`
 
-**Implements:** `Deref<Target = T>` and `DerefMut`, so you can access the inner type's fields directly.
+**Implements:** `Deref<Target = T>` and `DerefMut` for direct field access.
 
 **Type signature:**
 
@@ -64,11 +64,11 @@ pub struct Deposit<'info> {
 | `close(destination)` | Zero discriminator, drain lamports, reassign to system program |
 | `owner()` | Returns the expected owner `Address` (requires `T: Owner`) |
 
-### Static vs Dynamic Accounts
+### Static vs dynamic accounts
 
-For **fixed-size** accounts (all fields are fixed-width), `Account<T>` is constructed via pointer cast from `&AccountView` -- zero deserialization cost.
+**Fixed-size** accounts (all fixed-width fields) are constructed via pointer cast with no deserialization cost.
 
-For **dynamic** accounts (containing `String` or `Vec` fields), construction walks the inline length prefixes once to cache byte offsets, then provides O(1) field access:
+**Dynamic** accounts (containing `String` or `Vec` fields) walk the length prefixes once to cache byte offsets, then provide O(1) field access:
 
 ```rust
 #[account(discriminator = 5)]
@@ -97,7 +97,7 @@ Dynamic accounts have additional methods:
 
 ## `Signer`
 
-An account that must be a transaction signer. Does not check owner, data, or any other property.
+An account that must be a transaction signer.
 
 **Validates:**
 - `is_signer` flag is set -- returns `MissingRequiredSignature`
@@ -126,9 +126,7 @@ pub struct Initialize<'info> {
 
 ## `UncheckedAccount`
 
-An account with no validation at all. Useful for accounts passed through to CPI calls or whose constraints are checked manually by the instruction handler.
-
-**Validates:** Nothing.
+No validation. Use for accounts passed through to CPI calls or validated manually in the handler.
 
 **Type signature:**
 
@@ -154,7 +152,7 @@ pub struct ForwardCpi<'info> {
 
 ## `SystemAccount`
 
-An account owned by the System program (address `111...1`). Typically used for SOL-holding accounts that have no program data.
+An account owned by the System program. Used for SOL-holding wallets.
 
 **Validates:**
 - Account owner is the all-zeros address (System program) -- returns `IllegalOwner`
@@ -185,7 +183,7 @@ pub struct TransferSol<'info> {
 
 ## `Program<T>`
 
-A wrapper for program accounts that validates the executable flag and address. `T` must implement the `Id` trait, providing a `const ID: Address`.
+Validates the executable flag and address. `T` must implement `Id` (providing `const ID: Address`).
 
 **Validates:**
 - Account is executable -- returns `InvalidAccountData`
@@ -224,7 +222,7 @@ Common program marker types: `System`, `Token`, `Token2022`, `AssociatedTokenPro
 
 ## `Interface<T>`
 
-A wrapper for program accounts that accept multiple program IDs. `T` must implement the `ProgramInterface` trait.
+A program account wrapper that accepts multiple program IDs. `T` must implement `ProgramInterface`.
 
 **Validates:**
 - Account is executable -- returns `InvalidAccountData`
@@ -261,7 +259,7 @@ The built-in `TokenInterface` accepts both SPL Token and Token-2022 program IDs.
 
 ## `InterfaceAccount<T>`
 
-A typed account wrapper that accepts accounts owned by either SPL Token or Token-2022. Provides zero-copy `Deref`/`DerefMut` to the inner data layout.
+A typed account wrapper that accepts accounts owned by SPL Token or Token-2022. Provides zero-copy `Deref`/`DerefMut` to the inner data layout.
 
 **Validates:**
 - Account owner is SPL Token or Token-2022 -- returns `IllegalOwner`
@@ -304,7 +302,7 @@ pub struct Deposit<'info> {
 
 ## `Sysvar<T>`
 
-A read-only wrapper for sysvar accounts. Validates the account address matches `T::ID` and provides zero-copy access to the sysvar data via `Deref`.
+A read-only wrapper for sysvar accounts. Validates the account address matches `T::ID` and provides zero-copy access via `Deref`.
 
 **Validates:**
 - Account address matches the sysvar ID -- returns `IncorrectProgramId`
@@ -356,7 +354,7 @@ let rent = Rent::get()?;
 
 ## `Option<&'info T>`
 
-An optional account. When the client passes the program ID as the account address, the field resolves to `None`. Otherwise it resolves to `Some(&T)` with all normal validation for type `T`.
+An optional account. When the client passes the program ID as the account address, the field resolves to `None`. Otherwise it resolves to `Some(&T)` with full validation for type `T`.
 
 **Validates:**
 - If address equals the program ID: field is `None` (no further checks)
@@ -382,7 +380,7 @@ impl OptionalDeposit<'_> {
 }
 ```
 
-## Trait Requirements
+## Traits
 
 All account types implement `AsAccountView`, which provides access to the underlying `AccountView`:
 

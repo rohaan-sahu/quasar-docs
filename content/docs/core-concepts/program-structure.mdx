@@ -1,13 +1,13 @@
 ---
 title: Program Structure
-description: How a Quasar program is organized — the #[program] macro, module layout conventions, allocator configuration, and debug mode.
+description: The #[program] macro, module layout, allocator configuration, and debug mode.
 ---
 
-The `#[program]` macro generates the on-chain entrypoint, instruction dispatch table, event authority PDA, panic handler, and allocator configuration.
+The `#[program]` macro generates the on-chain entrypoint, instruction dispatch, event authority PDA, and allocator configuration.
 
 ## Module Layout
 
-A typical Quasar program has this directory structure:
+A typical Quasar program:
 
 ```
 my-program/
@@ -23,7 +23,7 @@ my-program/
     events.rs           # #[event] definitions
 ```
 
-The escrow example's `lib.rs`:
+Example `lib.rs` from the escrow program:
 
 ```rust
 #![no_std]
@@ -63,107 +63,66 @@ mod quasar_escrow {
 }
 ```
 
-- **`#![no_std]`** is required. Quasar programs target the SVM runtime and do not link `std`.
+- **`#![no_std]`** is required. Quasar programs do not link `std`.
 - **`declare_id!`** sets the `crate::ID` constant used for owner checks and PDA derivation.
-- **`#[program]`** annotates a module containing `#[instruction]` functions. The module name (`quasar_escrow`) determines the generated program type name (`QuasarEscrow`). A `client` submodule with typed instruction builders is also generated inside the program module (compiled only for non-SVM targets).
+- **`#[program]`** annotates a module containing `#[instruction]` functions. The module name (`quasar_escrow`) determines the generated program type name (`QuasarEscrow`). A `client` submodule with typed instruction builders is also generated (compiled only for off-chain targets).
 
 ## What `#[program]` Generates
 
-### 1. Entrypoint
+### Entrypoint
 
-The macro generates an `entrypoint` function with the `#[unsafe(no_mangle)]` attribute, which the Solana runtime calls when your program is invoked:
+The entry function that the runtime calls when your program is invoked. Initializes the allocator (if `alloc` is enabled) and dispatches to the matched instruction handler.
 
-```rust
-#[unsafe(no_mangle)]
-#[cfg(target_os = "solana")]
-pub unsafe extern "C" fn entrypoint(ptr: *mut u8, instruction_data: *const u8) -> u64 {
-    // Initialize bump allocator cursor (if alloc feature is enabled)
-    // Reconstruct instruction_data slice: length is at offset -8 from the pointer
-    // Dispatch to __dispatch(ptr, instruction_data)
-}
-```
+### Dispatch table
 
-`ptr` points to the raw SVM input buffer containing all accounts. `instruction_data` points to the serialized instruction payload, with its `u64` length stored at offset `-8`.
+Reads the discriminator prefix from instruction data and matches it against a compile-time table of handlers. `0xFF` prefix routes to the self-CPI event handler.
 
-### 2. Dispatch Table
-
-`__dispatch` checks the first byte of instruction data. If it is `0xFF`, the call is routed to `__handle_event` (the self-CPI event handler) instead of the instruction dispatch table. Otherwise, the discriminator prefix is matched against a compile-time table of instruction handlers via the `dispatch!` macro.
-
-Constraints enforced at compile time:
+Compile-time rules:
 - All instruction discriminators must have the same byte length.
 - No duplicates.
 - No discriminator may start with `0xFF` (reserved for events).
 
-### 3. Program Type and Event Authority
+### Program type and event authority
 
-Outside the module, the macro generates:
+- A **program type** (e.g., `QuasarEscrow`) that validates the executable flag and address. Implements the `Id` trait.
+- An **`EventAuthority`** PDA (seeds: `["__event_authority"]`) used by `emit_cpi!` to sign self-CPI event emissions.
 
-```rust
-// #[repr(transparent)] wrapper over AccountView, validates Executable + Address
-pub struct QuasarEscrow { /* view: AccountView */ }
+### Panic handler
 
-impl Id for QuasarEscrow {
-    const ID: Address = crate::ID;
-}
-
-// Event authority PDA, computed at compile time (zero runtime cost)
-pub struct EventAuthority { /* view: AccountView */ }
-
-impl EventAuthority {
-    const __PDA: (Address, u8) = find_program_address_const(&[b"__event_authority"], &crate::ID);
-    pub const ADDRESS: Address = Self::__PDA.0;
-    pub const BUMP: u8 = Self::__PDA.1;
-}
-```
-
-The program type gets an `emit_event` method that takes an `&impl Event` and an `&EventAuthority`, invoking self-CPI with the event data signed by the `EventAuthority` PDA.
-
-### 4. Panic Handler
-
-The macro generates a minimal panic handler (`#[panic_handler]`) that calls `log("PANIC")` and enters an infinite loop. This is gated behind `#[cfg(any(target_os = "solana", target_arch = "bpf"))]`.
+A minimal panic handler that logs `"PANIC"` on-chain.
 
 ## Allocator Configuration
 
-By default, the `#[program]` macro emits `no_alloc!()`, which installs a global allocator that panics on any allocation attempt. Quasar's zero-copy design means most programs never need heap allocation.
+By default, `#[program]` installs a global allocator that panics on any allocation attempt. Most programs never need heap allocation.
 
-If your program requires heap allocation (e.g., for `alloc::vec::Vec` or `alloc::string::String`), enable the `alloc` feature flag:
+If your program requires heap allocation (e.g., `alloc::vec::Vec` or `alloc::string::String`), enable the `alloc` feature:
 
 ```toml
 [dependencies]
 quasar-lang = { version = "...", features = ["alloc"] }
 ```
 
-With `alloc` enabled, the macro emits `heap_alloc!()` instead, installing a bump allocator. The entrypoint initializes the heap cursor before any allocation can occur:
-
-```rust
-#[cfg(feature = "alloc")]
-{
-    let heap_start = allocator::HEAP_START_ADDRESS as usize;
-    *(heap_start as *mut usize) = heap_start + core::mem::size_of::<usize>();
-}
-```
-
-Memory is never reclaimed within a single instruction execution.
+With `alloc` enabled, a bump allocator is installed instead.
 
 ## Debug Mode
 
-Quasar programs can be built with the `debug` feature flag to enable detailed error logging:
+Build with `debug` to enable detailed error logging:
 
 ```bash
 quasar build --debug
 ```
 
-In debug mode, account validation failures produce descriptive log messages like:
+Validation failures produce log messages like:
 
 ```
 Account 'escrow' (index 1): must be writable, no duplicates
 ```
 
-Without debug mode, these log statements are compiled out entirely, saving compute units and binary size. Always build without `--debug` for production deployments.
+Without `--debug`, these log statements are compiled out. Always build without `--debug` for production deployments.
 
 ## The `#![no_std]` Requirement
 
-Quasar programs are `#![no_std]` by design. The `prelude::*` import provides:
+Quasar programs are `#![no_std]`. `prelude::*` provides:
 
 - `ProgramError`, `Address`, `AccountView` -- core Solana types
 - `address!`, `declare_id!` -- address construction macros
@@ -181,7 +140,7 @@ Quasar programs are `#![no_std]` by design. The `prelude::*` import provides:
 
 ## Instruction Handler Pattern
 
-Each handler accepts `ctx: Ctx<T>` (or `ctx: CtxWithRemaining<T>`) as its first parameter, plus any additional typed arguments, and returns `Result<(), ProgramError>`. Business logic goes in `impl` blocks on the accounts struct:
+Each handler takes `ctx: Ctx<T>` (or `ctx: CtxWithRemaining<T>`) as its first parameter, plus any typed arguments, and returns `Result<(), ProgramError>`. Business logic goes in `impl` blocks on the accounts struct:
 
 ```rust
 #[instruction(discriminator = 0)]

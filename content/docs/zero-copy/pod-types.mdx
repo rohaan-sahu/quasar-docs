@@ -3,22 +3,7 @@ title: Pod Types
 description: Plain-old-data types that can be safely cast from raw byte buffers without alignment concerns.
 ---
 
-Solana programs receive account data as raw byte buffers with **alignment 1**. Casting such a buffer to a struct containing a `u64` (alignment 8) is undefined behavior, even if the pointer happens to be aligned at runtime and the data is never read through the misaligned reference.
-
-Quasar solves this with **Pod types**: alignment-1 wrappers around native integers that can be safely cast from any byte boundary.
-
-## Why alignment matters on the SVM
-
-The SVM runtime serializes all account data into a single input buffer -- a flat `&[u8]` at alignment 1. Native Rust integers have higher alignment requirements:
-
-| Type | Size | Required alignment |
-|------|------|--------------------|
-| `u16` | 2 bytes | 2 |
-| `u32` | 4 bytes | 4 |
-| `u64` | 8 bytes | 8 |
-| `u128` | 16 bytes | 16 |
-
-Casting `&[u8]` to `&u64` is undefined behavior under the Rust memory model, regardless of whether the pointer happens to be aligned at runtime. The compiler is allowed to assume references meet their type's alignment requirement and may emit instructions that fault on misaligned access.
+Solana programs receive account data as raw byte buffers with alignment 1. Casting to a struct containing a `u64` (alignment 8) is undefined behavior. **Pod types** are alignment-1 wrappers around native integers that can be safely cast from any byte boundary.
 
 ## The Pod solution
 
@@ -30,9 +15,9 @@ Each Pod type is a `#[repr(transparent)]` wrapper around a `[u8; N]` array:
 pub struct PodU64([u8; 8]);
 ```
 
-Because `[u8; 8]` has alignment 1, `PodU64` also has alignment 1 thanks to `#[repr(transparent)]`. This means a pointer cast from `&[u8]` to `&PodU64` is always valid -- no alignment trap, no undefined behavior.
+Because `[u8; 8]` has alignment 1, `PodU64` also has alignment 1 via `#[repr(transparent)]`.
 
-The Pod crate (`quasar-pod`) is `#![no_std]` and defines the following types:
+Available types (`quasar-pod`, `#![no_std]`):
 
 ### Unsigned integers
 
@@ -62,8 +47,6 @@ The Pod crate (`quasar-pod`) is `#![no_std]` and defines the following types:
 
 ## Conversions
 
-Pod types convert to and from their native counterparts via `From`/`Into`:
-
 ```rust
 // Native to Pod
 let amount = PodU64::from(1_000_000u64);
@@ -75,9 +58,9 @@ let raw: u64 = amount.into();
 let value: u64 = amount.get();
 ```
 
-The `.get()` method converts from little-endian bytes to the native integer. On little-endian targets (which includes SBF/Solana), this is a no-op -- the compiler optimizes it to a direct memory read.
+`.get()` converts from little-endian bytes to the native integer.
 
-Pod types also implement `PartialEq` and `PartialOrd` against both their Pod type and their native type:
+Pod types implement `PartialEq` and `PartialOrd` against both Pod and native types:
 
 ```rust
 let a = PodU64::from(100);
@@ -90,10 +73,10 @@ assert!(a < 200u64);      // Pod vs native
 
 ## Arithmetic
 
-Pod types support all standard arithmetic operators (`+`, `-`, `*`, `/`, `%`) as well as their assignment variants (`+=`, `-=`, etc.). The arithmetic behavior depends on the build profile:
+Standard arithmetic operators (`+`, `-`, `*`, `/`, `%`) and assignment variants (`+=`, `-=`, etc.) are supported:
 
-- **Debug builds**: Operators use checked arithmetic and **panic on overflow**. This catches bugs during development and testing.
-- **Release builds**: Operators use **wrapping** arithmetic for CU efficiency. No branch, no panic, no overhead.
+- **Debug builds**: Checked arithmetic, panics on overflow.
+- **Release builds**: Wrapping arithmetic.
 
 ```rust
 let a = PodU64::from(100);
@@ -107,7 +90,7 @@ let mut counter = PodU64::from(0);
 counter += 1u64;           // PodU64(1)
 ```
 
-For cases where overflow detection is required in all build profiles, use the checked methods:
+For overflow detection in all build profiles, use checked methods:
 
 ```rust
 let balance = PodU64::from(100);
@@ -118,7 +101,7 @@ match balance.checked_sub(PodU64::from(200)) {
 }
 ```
 
-The full set of checked methods:
+Checked methods:
 
 | Method | Returns |
 |--------|---------|
@@ -159,38 +142,22 @@ assert_eq!(negative.get(), -42i64);
 
 ## Constants
 
-Each Pod type exposes three constants:
-
 ```rust
 PodU64::ZERO  // The zero value: PodU64([0; 8])
 PodU64::MAX   // The maximum: PodU64(u64::MAX.to_le_bytes())
 PodU64::MIN   // The minimum: PodU64(u64::MIN.to_le_bytes())
 ```
 
-The `is_zero()` method provides a fast zero check by comparing the raw byte array:
+`is_zero()` checks for the zero value:
 
 ```rust
 let amount = PodU64::ZERO;
 assert!(amount.is_zero());
 ```
 
-## Compile-time safety
-
-The Pod crate includes compile-time assertions that verify every Pod type has the correct size and alignment:
-
-```rust
-const _: () = assert!(core::mem::align_of::<PodU64>() == 1);
-const _: () = assert!(core::mem::size_of::<PodU64>() == 8);
-const _: () = assert!(core::mem::align_of::<PodBool>() == 1);
-const _: () = assert!(core::mem::size_of::<PodBool>() == 1);
-// ... and so on for every Pod type
-```
-
-These assertions fire at compile time if a code change ever breaks the alignment-1 invariant. This is the same pattern used throughout Quasar -- the [Safety Model](/docs/zero-copy/safety-model) documents the full catalog of compile-time assertions.
-
 ## When to use Pod types vs native types
 
-You rarely need to use Pod types directly. The `#[account]` macro automatically maps native Rust types to their Pod companions in the generated zero-copy struct:
+You rarely use Pod types directly. `#[account]` maps native Rust types to their Pod companions automatically:
 
 ```rust
 #[account(discriminator = 1)]
@@ -204,13 +171,6 @@ pub struct Escrow {
 }
 ```
 
-When you access `escrow.receive` through the zero-copy view, you get a `PodU64` reference. The type mapping is transparent -- you write `u64` in your struct definition, and Quasar handles the rest.
+Accessing `escrow.receive` through the zero-copy view gives you a `PodU64`. Write `u64` in your struct definition; Quasar handles the rest.
 
-Use Pod types explicitly when:
-
-- **Building custom zero-copy structs** that are not generated by `#[account]`
-- **Working with raw account data** outside the macro system
-- **Performing arithmetic** on values read from zero-copy views (they are already Pod types)
-- **Defining SPL token or interface account layouts** where you need manual `#[repr(C)]` structs
-
-For the complete type mapping table, see [Account Layout](/docs/zero-copy/account-layout).
+Use Pod types explicitly when building custom zero-copy structs outside `#[account]`, working with raw account data, or defining SPL token/interface account layouts with manual `#[repr(C)]` structs. See [Account Layout](/docs/zero-copy/account-layout) for the complete type mapping table.

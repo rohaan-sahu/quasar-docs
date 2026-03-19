@@ -1,9 +1,9 @@
 ---
 title: CLI Reference
-description: Complete reference for the Quasar command-line interface.
+description: Reference for the Quasar command-line interface.
 ---
 
-The `quasar` CLI is a project-aware build tool for Solana programs. It wraps the Solana/Upstream toolchain for compilation, runs tests, generates IDLs, profiles compute-unit usage, and dumps sBPF assembly.
+The `quasar` CLI builds, tests, profiles, and deploys Solana programs. It wraps the Solana/Upstream toolchain and manages IDL generation and sBPF disassembly.
 
 ## Install
 
@@ -23,7 +23,7 @@ Scaffold a new Quasar project.
 quasar init [NAME] [OPTIONS]
 ```
 
-When a name is provided, uses saved defaults and skips prompts. Without a name, launches an interactive wizard that prompts for project name, toolchain, testing framework, and template.
+With a name, uses saved defaults and skips prompts. Without a name, launches an interactive wizard.
 
 | Flag | Description |
 |------|-------------|
@@ -34,14 +34,7 @@ When a name is provided, uses saved defaults and skips prompts. Without a name, 
 | `--template <TEMPLATE>` | Project template: `minimal` (single instruction) or `full` (state, events, instruction files) |
 | `--toolchain <TOOLCHAIN>` | Build toolchain: `solana` or `upstream` |
 
-The wizard generates a complete project directory with:
-- `Cargo.toml` and `Quasar.toml`
-- Source files (`src/lib.rs`, `src/instructions/`, etc.)
-- Test scaffolding (based on framework choice)
-- Program keypair
-- `.gitignore` and `git init` (unless `--no-git`)
-
-Preferences are saved to `~/.quasar/config.toml` for future runs.
+Generates a project with `Cargo.toml`, `Quasar.toml`, source files, test scaffolding, program keypair, and git setup. Preferences are saved to `~/.quasar/config.toml`.
 
 **Examples:**
 
@@ -56,7 +49,7 @@ quasar init my-app --framework mollusk --template full
 
 ### `quasar new instruction`
 
-Generate a new instruction handler with boilerplate and auto-incremented discriminator.
+Generate a new instruction handler with auto-incremented discriminator.
 
 ```
 quasar new instruction <NAME>
@@ -109,7 +102,7 @@ pub fn withdraw(ctx: Ctx<Withdraw>) -> Result<(), ProgramError> {
 
 ### `quasar build`
 
-Compile the on-chain program. Reads `Quasar.toml` to determine the toolchain (`solana` or `upstream`) and generates the IDL before building.
+Compile the program. Reads `Quasar.toml` for the toolchain and generates the IDL before building.
 
 ```
 quasar build [OPTIONS]
@@ -140,7 +133,7 @@ quasar build --features "devnet"
 
 ### `quasar test`
 
-Run the test suite. Builds first (unless `--no-build`), then runs either Rust tests or TypeScript tests based on the `Quasar.toml` testing framework.
+Run the test suite. Builds first (unless `--no-build`), then runs Rust or TypeScript tests based on `Quasar.toml`.
 
 ```
 quasar test [OPTIONS]
@@ -171,7 +164,7 @@ quasar test --debug --filter pda  # Debug build, filtered tests
 
 ### `quasar profile`
 
-Measure compute-unit usage by statically walking the sBPF binary's call graph. If no ELF path is given, runs a debug build automatically.
+Measure compute-unit usage by statically walking the sBPF binary's call graph. Runs a debug build automatically if no ELF path is given.
 
 ```
 quasar profile [ELF] [OPTIONS]
@@ -185,7 +178,7 @@ quasar profile [ELF] [OPTIONS]
 | `--share` | Upload the profile as a public GitHub Gist |
 | `-w, --watch` | Watch `src/` for changes and re-profile automatically |
 
-The profiler tracks results between runs. On the first run, it shows the top 5 hottest functions. On subsequent runs, it shows regressions and improvements:
+Tracks results between runs. On the first run, shows the top 5 functions by cost. On subsequent runs, shows deltas:
 
 ```
   my_program  12,345 CU (+42)
@@ -195,7 +188,7 @@ The profiler tracks results between runs. On the first run, it shows the top 5 h
   flamegraph  http://127.0.0.1:7777/?program=my_program
 ```
 
-A background HTTP server starts automatically to serve the interactive flamegraph viewer, shutting down after 30 seconds of inactivity.
+A background HTTP server starts automatically for the flamegraph viewer, shutting down after 30 seconds of inactivity.
 
 **Examples:**
 
@@ -212,7 +205,7 @@ quasar profile target/deploy/my_program.so  # Profile specific ELF
 
 ### `quasar dump`
 
-Dump sBPF assembly using `llvm-objdump` from Solana platform-tools. If no ELF path is given, auto-detects from `target/deploy/` or `target/profile/`.
+Dump sBPF assembly using `llvm-objdump`. Auto-detects the ELF from `target/deploy/` or `target/profile/` if not specified.
 
 ```
 quasar dump [ELF] [OPTIONS]
@@ -239,7 +232,7 @@ quasar dump target/deploy/my_program.so  # Specific ELF
 
 ### `quasar deploy`
 
-Deploy the program to a Solana cluster using the Solana CLI. Uses the cluster and wallet from your Solana CLI config (`solana config get`).
+Deploy the program to a Solana cluster. Uses the cluster and wallet from your Solana CLI config (`solana config get`).
 
 ```
 quasar deploy [OPTIONS]
@@ -275,7 +268,7 @@ quasar clean
 
 ### `quasar idl`
 
-Generate the IDL for a program crate. Produces JSON, TypeScript client, and Rust client module.
+Generate the IDL for a program crate. Produces JSON, a TypeScript client, and a Rust client module.
 
 ```
 quasar idl <PATH>
@@ -296,7 +289,7 @@ quasar idl programs/my-program # Specific program crate
 
 ### `quasar config`
 
-Manage global settings stored in `~/.quasar/config.toml`. Running without a subcommand launches an interactive menu.
+Manage global settings in `~/.quasar/config.toml`. Running without a subcommand opens an interactive menu.
 
 ```
 quasar config [SUBCOMMAND]

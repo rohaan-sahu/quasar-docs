@@ -3,11 +3,11 @@ title: Account Layout
 description: How Quasar lays out account data in memory for zero-copy access.
 ---
 
-When you annotate a struct with `#[account]`, Quasar generates a **zero-copy companion struct** -- a `#[repr(C)]` struct where every field that needs alignment greater than 1 has been replaced with its Pod equivalent. This companion struct overlays the raw account data buffer. Your code interacts with it through `Deref`/`DerefMut`, so the translation is invisible at the call site.
+`#[account]` generates a **zero-copy companion struct** -- a `#[repr(C)]` struct where every field with alignment greater than 1 is replaced with its Pod equivalent. This companion struct overlays the raw account data buffer. Field access goes through `Deref`/`DerefMut`, so the translation is invisible at the call site.
 
 ## From source to companion struct
 
-Consider the `Escrow` account from the escrow example:
+Given this `Escrow` account:
 
 ```rust
 #[account(discriminator = 1)]
@@ -21,7 +21,7 @@ pub struct Escrow {
 }
 ```
 
-The `#[account]` macro generates the following (simplified for clarity):
+The macro generates (simplified):
 
 ```rust
 // The view type -- what you actually interact with
@@ -45,11 +45,9 @@ pub struct EscrowZc {
 const _: () = assert!(core::mem::align_of::<EscrowZc>() == 1);
 ```
 
-The naming convention is `{Name}Zc`. The companion struct lives in a private module (`__escrow_zc`) so it does not pollute your namespace -- you access fields through `Deref` on the view type.
+The companion struct is named `{Name}Zc`. You access fields through `Deref` on the view type.
 
 ## Type mapping table
-
-The `#[account]` macro maps native Rust types to their zero-copy companions:
 
 | Rust type | ZC companion type | Size (bytes) | Alignment |
 |-----------|-------------------|-------------|-----------|
@@ -68,11 +66,11 @@ The `#[account]` macro maps native Rust types to their zero-copy companions:
 
 Types that already have alignment 1 (`u8`, `i8`, `Address`) pass through unchanged. Types with higher native alignment (`u16` through `u128`, `bool`) are replaced with their Pod equivalents.
 
-Any type not in this table (e.g., a custom `#[repr(C)]` struct) passes through unchanged. It is your responsibility to ensure such types have alignment 1 -- the compile-time assertion on the companion struct will catch violations.
+Any type not in this table (e.g., a custom `#[repr(C)]` struct) passes through unchanged. Ensure such types have alignment 1 -- the compile-time assertion on the companion struct will catch violations.
 
 ## Memory layout
 
-Account data on Solana follows this layout:
+Account data follows this layout:
 
 ```
 [discriminator] [fixed fields (ZC companion)] [dynamic fields, if any]
@@ -98,41 +96,9 @@ The `Space` trait reports this total: `Space::SPACE = 1 + size_of::<EscrowZc>() 
 
 Because the companion struct is `#[repr(C)]` and every field has alignment 1, there is **no padding** between fields. The layout is fully deterministic and matches the wire format byte-for-byte.
 
-## The pointer cast mechanism
+## AccountCheck: validation before pointer cast
 
-The view type (`Escrow`) is `#[repr(transparent)]` over `AccountView`. This means a pointer to an `AccountView` can be safely reinterpreted as a pointer to `Escrow` -- they have identical memory layout.
-
-When you access fields through the view type, `Deref` performs a pointer cast:
-
-```rust
-impl core::ops::Deref for Escrow {
-    type Target = EscrowZc;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe {
-            &*(self.__view.data_ptr().add(DISC_LEN) as *const EscrowZc)
-        }
-    }
-}
-```
-
-This is the core zero-copy operation:
-
-1. `data_ptr()` returns a raw pointer to the start of the account's data buffer.
-2. `.add(DISC_LEN)` skips past the discriminator bytes.
-3. The cast `as *const EscrowZc` reinterprets the remaining bytes as the companion struct.
-
-This is sound because:
-
-- The companion struct has alignment 1 (enforced by compile-time assertion), and the source data is a `&[u8]` with alignment 1.
-- `AccountCheck::check()` has already verified that the data buffer is large enough to contain the discriminator plus the companion struct.
-- The discriminator bytes have been validated before the `Deref` is reachable.
-
-The mutable variant (`DerefMut`) follows the same pattern through `data_mut_ptr()`.
-
-## AccountCheck: bounds and discriminator validation
-
-Before any pointer cast happens, `AccountCheck::check()` validates the account:
+`AccountCheck::check()` validates the account before any pointer cast:
 
 ```rust
 impl AccountCheck for Escrow {
@@ -151,26 +117,20 @@ impl AccountCheck for Escrow {
 }
 ```
 
-The bounds check ensures the buffer is at least `discriminator_len + size_of::<ZcCompanion>()` bytes. If the account data is too small, the program returns `AccountDataTooSmall` before any unsafe code executes.
-
-The discriminator check verifies each discriminator byte matches. All-zero discriminators are banned at compile time (see [Safety Model](/docs/zero-copy/safety-model)), so uninitialized account data can never pass this check.
+The bounds check ensures the buffer is large enough. The discriminator check verifies the bytes match. All-zero discriminators are banned at compile time (see [Safety Model](/docs/zero-copy/safety-model)), so uninitialized account data never passes validation.
 
 ## Multi-byte discriminators
 
-Discriminators can be more than one byte:
+Discriminators can be more than one byte. Single-byte discriminators are the common case.
 
 ```rust
 #[account(discriminator = [1, 0, 0, 0])]
 pub struct LargeAccount { ... }
 ```
 
-Each byte is checked independently against the account data at the corresponding offset. The discriminator length is subtracted from the data pointer offset in `Deref`.
-
-Single-byte discriminators (`discriminator = 1`) are the common case and the most CU-efficient -- one byte comparison instead of multiple.
-
 ## Generated trait implementations
 
-The `#[account]` macro generates implementations for several traits:
+`#[account]` generates implementations for:
 
 ### `Discriminator`
 
@@ -200,7 +160,7 @@ The owner is always the program that defines the account, taken from `declare_id
 
 ### `set_inner`
 
-A method that writes all field values into the account data buffer. Used after creating an account:
+Writes all field values into the account data buffer at once:
 
 ```rust
 impl Escrow {
@@ -228,7 +188,7 @@ Native types like `u64` are automatically converted to their Pod equivalents whe
 
 ## Reading and writing fields
 
-With `Deref` in place, field reads go directly through the pointer cast:
+Field reads go through the zero-copy view:
 
 ```rust
 // In an instruction handler
@@ -243,31 +203,11 @@ Writing through `DerefMut`:
 escrow.receive = PodU64::from(new_amount);
 ```
 
-The write goes directly to the account data buffer -- there is no intermediate copy, no serialization step. This is the zero-copy advantage: reads and writes are pointer dereferences, not deserialization calls.
-
-## The ZeroCopyDeref trait
-
-In addition to `Deref`/`DerefMut` on the view type itself, Quasar generates a `ZeroCopyDeref` implementation:
-
-```rust
-impl ZeroCopyDeref for Escrow {
-    type Target = EscrowZc;
-
-    fn deref_from(view: &AccountView) -> &Self::Target {
-        unsafe { &*(view.data_ptr().add(1) as *const EscrowZc) }
-    }
-
-    fn deref_from_mut(view: &mut AccountView) -> &mut Self::Target {
-        unsafe { &mut *(view.data_mut_ptr().add(1) as *mut EscrowZc) }
-    }
-}
-```
-
-This trait enables `InterfaceAccount<T>` and other polymorphic wrappers to access the companion struct without going through the concrete view type.
+Writes go directly to the account data buffer -- no intermediate copy, no serialization step.
 
 ## Alignment-1 invariant
 
-The most critical generated code is the compile-time assertion:
+Every companion struct must have alignment 1. This is enforced at compile time:
 
 ```rust
 const _: () = assert!(
@@ -276,6 +216,4 @@ const _: () = assert!(
 );
 ```
 
-If you add a field type with alignment greater than 1 (for example, a raw `u64` instead of using the macro's automatic mapping), this assertion fires at compile time. You cannot build a Quasar program with a misaligned companion struct.
-
-This assertion, combined with the Pod types' `#[repr(transparent)]` guarantee, forms the foundation of Quasar's memory safety story. For the complete picture, see [Safety Model](/docs/zero-copy/safety-model).
+If any field has alignment greater than 1, this assertion fires at compile time. See [Safety Model](/docs/zero-copy/safety-model) for the full picture.

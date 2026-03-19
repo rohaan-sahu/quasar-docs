@@ -1,15 +1,15 @@
 ---
 title: Program Derived Addresses
-description: Using PDAs for deterministic account addressing in Quasar — optimized derivation, seed expressions, bump capture, and PDA signing.
+description: PDA derivation, seed validation, bump discovery, and PDA signing.
 ---
 
-Quasar provides optimized PDA derivation and a declarative syntax for seed validation, bump discovery, and PDA signing in CPI.
+PDAs are declared with `seeds` and `bump` attributes on account fields.
 
 ## Seeds in Account Validation
 
 ### Verifying an Existing PDA
 
-When the bump is stored in the account data, use `bump = expr` to verify the address:
+When the bump is stored in account data, use `bump = expr` to verify the address:
 
 ```rust
 #[derive(Accounts)]
@@ -26,7 +26,7 @@ pub struct Take<'info> {
 }
 ```
 
-With `bump = escrow.bump`, the generated code calls `verify_program_address`: one SHA-256 hash, one comparison. This is the cheapest path.
+With `bump = escrow.bump`, the address is verified with a single hash -- the cheapest option.
 
 ### Discovering a Bump
 
@@ -41,7 +41,7 @@ pub struct Make<'info> {
 }
 ```
 
-The generated code iterates from bump 255 downward until it finds a valid PDA. The discovered bump is stored in the `Bumps` struct.
+The discovered bump is stored in the `Bumps` struct.
 
 ### Seed Expressions
 
@@ -53,7 +53,7 @@ Seeds can be:
 
 ## The Bumps Struct
 
-For each `#[derive(Accounts)]` struct that contains PDA-validated fields, the macro generates a companion `Bumps` struct:
+For each `#[derive(Accounts)]` struct with PDA fields, a companion `Bumps` struct is generated:
 
 ```rust
 #[derive(Copy, Clone)]
@@ -62,11 +62,11 @@ pub struct MakeBumps {
 }
 ```
 
-Only fields with `seeds` + `bump` get an entry. The bump value is populated during parsing and made available via `ctx.bumps`.
+Only fields with `seeds` + `bump` get an entry. Available via `ctx.bumps`.
 
 ### Seed Helper Methods
 
-The bumps struct generates `*_seeds()` methods that return the complete seed array for CPI signing:
+`*_seeds()` methods return the complete seed array for CPI signing:
 
 ```rust
 impl TakeBumps {
@@ -89,9 +89,9 @@ pub fn withdraw_tokens_and_close(&mut self, bumps: &TakeBumps) -> Result<(), Pro
 
 ## PDA Signing in CPI
 
-When your program needs to "sign" as a PDA in a cross-program invocation, pass the PDA's seeds to `invoke_signed`. The runtime verifies that seeds + program ID produce the signer address.
+Pass the PDA's seeds to `invoke_signed`. The runtime verifies that seeds + program ID produce the signer address.
 
-The typical flow:
+Typical flow:
 
 1. During account parsing, the bump is discovered or verified and stored in `ctx.bumps`.
 2. In the handler, call `bumps.field_seeds()` to get the seed array.
@@ -101,7 +101,7 @@ See [Cross-Program Invocations](./cpi) for the full CPI API.
 
 ## Storing Bumps
 
-Store the bump in the account data so future instructions use `bump = account.bump` (verify) instead of re-deriving (find):
+Store the bump in account data so future instructions use `bump = account.bump` (verify) instead of bare `bump` (find):
 
 ```rust
 #[account(discriminator = 1)]
@@ -131,7 +131,7 @@ pub fn make_escrow(&mut self, receive: u64, bumps: &MakeBumps) -> Result<(), Pro
 }
 ```
 
-Verify is cheaper than find (one hash vs. iterating), and storing the canonical bump prevents accidental use of non-canonical bumps.
+Verify is cheaper than find (one hash vs. iterating from 255), and storing the canonical bump prevents accidental use of non-canonical bumps.
 
 ## PDA Address Limits
 

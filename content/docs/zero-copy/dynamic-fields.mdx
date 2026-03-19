@@ -3,11 +3,11 @@ title: Dynamic Fields
 description: Working with variable-length data like strings and vectors in zero-copy accounts.
 ---
 
-Fixed-size accounts map to a `#[repr(C)]` companion struct where every field access is a pointer dereference at a known offset. Dynamic fields -- variable-length strings and arrays -- use **marker types** that the `#[account]` macro expands into length-prefixed wire formats. Dynamic fields must come **after** all fixed fields.
+Dynamic fields -- variable-length strings and arrays -- use **marker types** that expand into length-prefixed wire formats. They must come **after** all fixed fields in the struct.
 
 ## The marker types
 
-Quasar provides two marker types in `quasar_lang::dynamic`:
+Two marker types in `quasar_lang::dynamic`:
 
 ### `String<P, N>`
 
@@ -25,11 +25,9 @@ pub tag: String<u8, 32>,         // u8 prefix, max 32 bytes (explicit prefix)
 pub label: String<'a, 32>,       // u32 prefix, max 32 bytes (lifetime first, prefix defaults to u32)
 ```
 
-The `String<'a, N>` syntax places the struct's lifetime first and defaults the prefix to `u32`. This is the common form inside `#[account]` structs with dynamic fields.
+`String<'a, N>` places the struct's lifetime first and defaults the prefix to `u32`. This is the common form in `#[account]` structs.
 
-Wire format: `[prefix: P bytes] [utf-8 data: len bytes]`
-
-The prefix encodes the **byte length** of the string data (not the character count).
+Wire format: `[prefix: P bytes] [utf-8 data: len bytes]`. The prefix encodes the **byte length** (not the character count).
 
 ### `Vec<T, P, N>`
 
@@ -39,7 +37,7 @@ A variable-length array of fixed-size elements stored inline in the account data
 - `P` -- count prefix type (`u8`, `u16`, or `u32`). Determines how the element count is encoded. Default: `u32`.
 - `N` -- maximum element count. Validated at write time. Default: `8`.
 
-Similarly to `String`, the macro accepts a lifetime-first syntax:
+Like `String`, accepts a lifetime-first syntax:
 
 ```rust
 pub signers: Vec<Address>,           // u32 prefix, max 8 elements (all defaults)
@@ -48,18 +46,7 @@ pub tags: Vec<Address, u16, 100>,    // u16 prefix, max 100 elements (explicit p
 pub signers: Vec<'a, Address, 10>,   // u32 prefix, max 10 elements (lifetime first)
 ```
 
-Wire format: `[prefix: P bytes] [elements: count * size_of::<T>() bytes]`
-
-The prefix encodes the **element count** (not the byte length). Elements are packed contiguously after the prefix with no padding.
-
-A compile-time assertion enforces that `T` has alignment 1:
-
-```rust
-const _: () = assert!(
-    core::mem::align_of::<T>() == 1,
-    "dynamic Vec element type must have alignment 1"
-);
-```
+Wire format: `[prefix: P bytes] [elements: count * size_of::<T>() bytes]`. The prefix encodes the **element count** (not byte length). Elements are packed contiguously with no padding. A compile-time assertion enforces alignment 1 on `T`.
 
 ## Borsh compatibility
 
@@ -77,9 +64,7 @@ pub name: String<u8, 32>,        // 1-byte prefix saves 3 bytes
 pub items: Vec<Address, u8, 10>, // 1-byte prefix saves 3 bytes
 ```
 
-## A real example: the multisig config
-
-The multisig example defines a dynamic account with both a string and a vector:
+## Example: multisig config
 
 ```rust
 #[account(discriminator = 1)]
@@ -92,11 +77,9 @@ pub struct MultisigConfig<'a> {
 }
 ```
 
-Note the lifetime parameter `'a`. Structs with dynamic fields **must** have a lifetime parameter -- the macro requires it because the generated accessor methods return borrowed references (`&str`, `&[Address]`) that borrow from the account data buffer.
+Structs with dynamic fields **must** have a lifetime parameter -- the generated accessors return borrowed references (`&str`, `&[Address]`) into the account data buffer.
 
-### Memory layout
-
-The wire format for this account is:
+### Wire format
 
 ```
 Offset     Size         Field
@@ -113,7 +96,7 @@ Offset     Size         Field
 
 Where `L` is the actual byte length of the label string.
 
-The `Space` trait for dynamic accounts reports the **minimum** space (all dynamic fields empty):
+`Space` reports the **minimum** space (all dynamic fields empty):
 
 ```rust
 impl Space for MultisigConfig<'_> {
@@ -125,7 +108,7 @@ impl Space for MultisigConfig<'_> {
 }
 ```
 
-The companion struct (`MultisigConfigZc`) contains only the fixed fields:
+The companion struct contains only the fixed fields:
 
 ```rust
 #[repr(C)]
@@ -136,7 +119,7 @@ pub struct MultisigConfigZc {
 }
 ```
 
-Dynamic accounts also expose `MIN_SPACE` and `MAX_SPACE` constants:
+`MIN_SPACE` and `MAX_SPACE` are also available:
 
 ```rust
 MultisigConfig::MIN_SPACE  // 43 bytes (all dynamic fields empty)
@@ -165,7 +148,7 @@ pub struct Invalid<'a> {
 
 The error message is: `fixed fields must precede all dynamic fields (String/Vec)`.
 
-This restriction exists because the ZC companion struct maps 1:1 with the fixed-field header. Dynamic fields are accessed by walking length prefixes from the end of the header, so they must be contiguous at the tail of the account data.
+Dynamic fields are accessed by walking length prefixes from the end of the fixed-field header, so they must be contiguous at the tail.
 
 ## No nested dynamic types
 
@@ -177,11 +160,11 @@ pub items: Vec<String>,           // ERROR: nested dynamic type
 pub nested: Vec<Vec<Address>>,    // ERROR: nested dynamic type
 ```
 
-The error message is: `Vec element type must be a fixed-size type; nested dynamic types (String/Vec) are not supported`.
+The compiler rejects this with: `Vec element type must be a fixed-size type; nested dynamic types (String/Vec) are not supported`.
 
 ## Reading dynamic fields
 
-The macro generates typed accessor methods for each dynamic field. For `MultisigConfig`:
+The macro generates typed accessors for each dynamic field:
 
 ```rust
 impl MultisigConfig<'_> {
@@ -193,9 +176,7 @@ impl MultisigConfig<'_> {
 }
 ```
 
-These accessors are **O(1)** -- they use cached byte offsets computed once during account parsing. The first dynamic field's offset is a compile-time constant (discriminator + header size). Subsequent field offsets are cached in a `[u32; N-1]` array that is populated when the account is first parsed.
-
-Usage in an instruction handler:
+These accessors are O(1). Example:
 
 ```rust
 pub fn verify_and_transfer(
@@ -229,7 +210,7 @@ pub fn verify_and_transfer(
 }
 ```
 
-Raw accessors (`label_raw()`, `signers_raw()`) are also generated. These return `RawEncoded`, a wrapper around the prefix + data bytes, useful for zero-copy CPI pass-through where the raw wire format can be memcpy'd without decode/re-encode.
+Raw accessors (`label_raw()`, `signers_raw()`) return `RawEncoded` -- the prefix + data bytes for zero-copy CPI pass-through without decode/re-encode.
 
 ## Writing dynamic fields
 
@@ -237,7 +218,7 @@ Each dynamic field gets a setter method: `set_label()`, `set_signers()`, etc.
 
 ### Writing during initialization
 
-The `set_inner` method writes all fields (fixed and dynamic) at once. For dynamic accounts, it takes a payer and optional rent reference for reallocation:
+`set_inner` writes all fields at once, taking a payer and optional rent reference for reallocation:
 
 ```rust
 self.config.set_inner(
@@ -253,7 +234,7 @@ self.config.set_inner(
 
 ### Writing individual fields after initialization
 
-Individual setters handle reallocation automatically:
+Individual setters handle reallocation automatically, shifting trailing fields as needed:
 
 ```rust
 pub fn update_label(&mut self, label: &str) -> Result<(), ProgramError> {
@@ -261,26 +242,11 @@ pub fn update_label(&mut self, label: &str) -> Result<(), ProgramError> {
 }
 ```
 
-When the new value is larger than the old value, the setter:
-
-1. Reallocates the account to fit the new data (using the payer for additional lamports).
-2. Shifts trailing data (subsequent dynamic fields) forward via `memmove`.
-3. Writes the new length prefix and data.
-4. Updates cached offsets for subsequent fields.
-
-When the new value is smaller, the process reverses: data shifts backward, then the account shrinks.
-
-The maximum length is validated before any mutation:
-
-```rust
-if value.len() > MAX {
-    return Err(QuasarError::DynamicFieldTooLong.into());
-}
-```
+Exceeding the maximum length returns `QuasarError::DynamicFieldTooLong`.
 
 ## Mutable access to Vec elements
 
-Vec fields additionally generate a `_mut()` accessor that returns a mutable slice:
+Vec fields also generate a `_mut()` accessor for in-place modification:
 
 ```rust
 // Read-only access
@@ -291,22 +257,15 @@ let signers_mut: &mut [Address] = self.config.signers_mut();
 signers_mut[0] = new_address;
 ```
 
-The mutable accessor does not change the length -- it gives you mutable access to the existing elements. To change the number of elements, use `set_signers()`.
+This modifies elements in-place without changing the count. To change element count, use `set_signers()`.
 
 ## AccountCheck for dynamic accounts
 
-Dynamic account validation is more thorough than fixed accounts. The generated `AccountCheck::check()` walks every dynamic field's length prefix and validates:
-
-1. The prefix bytes are within bounds.
-2. The decoded length/count does not exceed the field's maximum.
-3. The data region (prefix + data) is within bounds.
-4. For string fields: the data is valid UTF-8.
-
-This validation runs once during `from_account_view()`, which calls `AccountCheck::check()` then caches byte offsets in a `__parse()` step. After passing, all subsequent field accesses are safe -- they use the validated offsets without re-checking bounds. The string accessors use `from_utf8_unchecked` on SBF since the check already validated the data.
+`AccountCheck::check()` for dynamic accounts validates each length prefix, ensures length/count does not exceed the field's maximum, checks data region bounds, and verifies string data is valid UTF-8. This runs once during account parsing; after passing, all field accesses use cached offsets.
 
 ## Tail fields
 
-For advanced use cases, Quasar supports **tail fields** -- `&str` or `&[u8]` references that consume all remaining account data after the fixed header and any prefixed dynamic fields. Tail fields have no length prefix; their length is implicitly `data_len - offset`.
+**Tail fields** are `&str` or `&[u8]` references that consume all remaining account data after the fixed header and any prefixed dynamic fields. They have no length prefix; their length is implicitly `data_len - offset`.
 
 ```rust
 #[account(discriminator = 1)]

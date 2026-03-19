@@ -3,18 +3,14 @@ title: Remaining Accounts
 description: Accessing dynamically-sized remaining accounts in instructions.
 ---
 
-Some instructions need a variable number of accounts -- a list of signers for a multisig, a set of token accounts for a batch transfer, or extra accounts forwarded to a CPI. Quasar handles this through **remaining accounts**: accounts passed after the declared (typed) accounts in the instruction.
-
-The remaining accounts system is zero-allocation and uses raw pointer arithmetic over the SVM input buffer, yielding each account lazily through an iterator.
+Some instructions need a variable number of accounts -- a list of signers for a multisig, a set of token accounts for a batch transfer, or extra accounts forwarded to a CPI. **Remaining accounts** are accounts passed after the declared (typed) accounts in the instruction.
 
 ## `Ctx` vs `CtxWithRemaining`
 
-Quasar provides two context types for instruction handlers:
+- **`Ctx<T>`** -- parsed and validated accounts only. For instructions with a fixed set of accounts.
+- **`CtxWithRemaining<T>`** -- also captures remaining accounts. For instructions that need additional accounts.
 
-- **`Ctx<T>`** -- parsed and validated accounts only. Use this for instructions that consume a fixed set of accounts.
-- **`CtxWithRemaining<T>`** -- like `Ctx<T>` but also captures the remaining accounts region. Use this when you need to iterate over additional accounts.
-
-The choice is made at the instruction signature:
+Choose at the instruction signature:
 
 ```rust
 // Fixed accounts only
@@ -33,25 +29,11 @@ pub fn create_multisig(
 }
 ```
 
-The `#[program]` macro detects whether the first parameter is `Ctx<T>` or `CtxWithRemaining<T>` and generates the appropriate dispatch code. When using `CtxWithRemaining`, the `remaining_accounts()` method returns a `RemainingAccounts` struct.
+The `#[program]` macro detects which context type you use and generates the appropriate dispatch code.
 
 ## The `RemainingAccounts` struct
 
-`RemainingAccounts` is a zero-allocation accessor over the SVM input buffer:
-
-```rust
-pub struct RemainingAccounts<'a> {
-    ptr: *mut u8,
-    boundary: *const u8,
-    declared: &'a [AccountView],
-}
-```
-
-- `ptr` -- points to the first remaining account entry in the SVM buffer.
-- `boundary` -- marks the end of the accounts region (the start of instruction data). Every pointer dereference is preceded by a `ptr >= boundary` check.
-- `declared` -- previously parsed declared accounts, used for duplicate resolution.
-
-There is no count field. The boundary pointer design means zero reads and zero arithmetic in the dispatch hot path -- the cost is paid only when you actually iterate.
+`RemainingAccounts` is a zero-allocation accessor over the SVM input buffer. It provides bounds-checked access and automatic duplicate resolution against the declared accounts.
 
 ### Checking for remaining accounts
 
@@ -64,7 +46,7 @@ if remaining.is_empty() {
 
 ### Random access
 
-The `get(index)` method walks from the buffer start to the requested index. This is O(n) per call:
+`get(index)` walks from the buffer start to the requested index (O(n) per call):
 
 ```rust
 let first = remaining.get(0);  // Option<AccountView>
@@ -73,7 +55,7 @@ let third = remaining.get(2);  // walks past 0, 1, returns 2
 
 ### Iteration
 
-The `iter()` method returns a `RemainingIter` that yields accounts lazily:
+`iter()` returns a `RemainingIter` that yields accounts lazily:
 
 ```rust
 for account in remaining.iter() {
@@ -82,11 +64,9 @@ for account in remaining.iter() {
 }
 ```
 
-The iterator is the preferred access pattern. It builds an internal cache as it walks, enabling O(1) duplicate resolution for subsequent accounts.
+The iterator caches accounts as it walks, enabling O(1) duplicate resolution. Prefer it over `get()`.
 
 ## Real example: multisig creation
-
-The multisig example collects signer addresses from remaining accounts during creation:
 
 ```rust
 #[derive(Accounts)]
@@ -140,11 +120,9 @@ impl<'info> Create<'info> {
 }
 ```
 
-Note that remaining accounts are unchecked by default -- the handler explicitly verifies `is_signer()` and bounds the count at 10. Addresses are collected into a stack-allocated `MaybeUninit` array to avoid heap allocation.
+Remaining accounts are unchecked by default -- the handler explicitly verifies `is_signer()` and bounds the count.
 
 ## Real example: multisig execution
-
-The execute_transfer instruction verifies threshold signatures from remaining accounts:
 
 ```rust
 #[derive(Accounts)]
@@ -203,51 +181,9 @@ Non-signer accounts are silently skipped (with `continue`), allowing clients to 
 
 ## Duplicate account handling
 
-The SVM input buffer uses a compact encoding for duplicate accounts: instead of repeating the full account data, a duplicate entry contains only a `u64` index pointing to the original account. The `borrow_state` field of the `RuntimeAccount` header distinguishes the two cases:
+The SVM uses a compact encoding for duplicate accounts -- a duplicate entry references the original by index instead of repeating the full data. The iterator handles this transparently: duplicates resolve to the same `AccountView` as the original, whether it was a declared account or a previously yielded remaining account.
 
-- `borrow_state == 0xFF` (`NOT_BORROWED`): a non-duplicate entry with full account data.
-- `borrow_state == N` (small integer): a duplicate that references account index `N`.
-
-The remaining accounts iterator handles duplicates transparently. When it encounters a duplicate entry:
-
-1. It reads the original index from the entry.
-2. If the index falls within the declared accounts slice, it returns a copy of that `AccountView`.
-3. If the index refers to a previously yielded remaining account, it reads from the iterator's internal cache.
-4. The pointer advances past the 8-byte duplicate entry (instead of the full account size).
-
-### The iterator cache
-
-`RemainingIter` maintains a `MaybeUninit<[AccountView; 64]>` cache on the stack. Each time `next()` yields an account, the `AccountView` is written to the cache at position `self.index`. This enables O(1) duplicate resolution: when a duplicate references remaining account `N`, the iterator reads directly from `cache[N]` instead of re-walking the buffer.
-
-The cache is bounded at 64 entries. If an instruction requires more than 64 remaining accounts, the iterator returns `Err(QuasarError::RemainingAccountsOverflow)`:
-
-```rust
-if self.index >= MAX_REMAINING_ACCOUNTS {
-    return Some(Err(QuasarError::RemainingAccountsOverflow.into()));
-}
-```
-
-### Defense against chain overflow
-
-Duplicate resolution uses a **2-hop depth limit** for the walk-based `get()` method. The SVM guarantees that duplicates resolve in one hop (a dup always points to a non-dup), but the depth limit provides defense-in-depth against malformed input:
-
-```rust
-fn resolve_dup_walk(orig_idx: usize, ...) -> AccountView {
-    let mut idx = orig_idx;
-    for _ in 0..2 {
-        // resolve...
-    }
-    unreachable!("duplicate chain exceeded maximum depth")
-}
-```
-
-The iterator's `resolve_dup` method uses an additional bounds check to prevent reading uninitialized cache memory:
-
-```rust
-if remaining_idx >= self.index {
-    return None;
-}
-```
+The iterator cache is bounded at 64 entries. Exceeding this returns `Err(QuasarError::RemainingAccountsOverflow)`.
 
 ## Performance characteristics
 
@@ -260,46 +196,16 @@ if remaining_idx >= self.index {
 | Duplicate resolution (iterator) | O(1) -- cache lookup |
 | Duplicate resolution (get) | O(n) -- re-walks buffer with 2-hop limit |
 
-The iterator is significantly more efficient than repeated `get()` calls. For any use case that processes all remaining accounts, prefer `iter()`.
-
-## The `Context` pipeline
-
-The full context pipeline shows how remaining accounts flow from the entrypoint to your handler:
-
-1. **Entrypoint**: The SVM passes a raw byte buffer. The `dispatch!` macro parses the account count and deserializes declared accounts into a `MaybeUninit` array.
-
-2. **Context creation**: `CtxWithRemaining::new()` saves the `remaining_ptr` (pointing past the last declared account) and the `accounts_boundary` (pointing to the instruction data length field).
-
-3. **`remaining_accounts()`**: Returns a `RemainingAccounts` struct holding the pointer, boundary, and declared accounts slice.
-
-4. **Your handler**: Calls `iter()` or `get()` to access individual accounts.
-
-```rust
-pub struct CtxWithRemaining<'info, T: ParseAccounts<'info> + AccountCount> {
-    pub accounts: T,
-    pub bumps: T::Bumps,
-    pub program_id: &'info [u8; 32],
-    pub data: &'info [u8],
-    remaining_ptr: *mut u8,
-    declared: &'info [AccountView],
-    accounts_boundary: *const u8,
-}
-
-impl<'info, T: ParseAccounts<'info> + AccountCount> CtxWithRemaining<'info, T> {
-    pub fn remaining_accounts(&self) -> RemainingAccounts<'info> {
-        RemainingAccounts::new(self.remaining_ptr, self.accounts_boundary, self.declared)
-    }
-}
-```
+Prefer `iter()` over repeated `get()` calls when processing all remaining accounts.
 
 ## Guidelines
 
-1. **Use `CtxWithRemaining<T>` only when needed.** If your instruction does not access remaining accounts, use `Ctx<T>`. The generated dispatch code is slightly simpler.
+1. **Use `CtxWithRemaining<T>` only when needed.** If your instruction does not access remaining accounts, use `Ctx<T>`.
 
-2. **Prefer `iter()` over `get()`.** The iterator builds a cache for O(1) duplicate resolution. Repeated `get()` calls re-walk the buffer each time.
+2. **Prefer `iter()` over `get()`.** The iterator caches for O(1) duplicate resolution. Repeated `get()` calls re-walk the buffer each time.
 
-3. **Validate remaining accounts explicitly.** The framework does not validate remaining accounts automatically -- they are unchecked by design. Check `is_signer()`, `is_writable()`, owner, and any other constraints in your handler.
+3. **Validate remaining accounts explicitly.** They are unchecked by design. Check `is_signer()`, `is_writable()`, owner, and any other constraints in your handler.
 
-4. **Stay under 64 remaining accounts.** The iterator cache is bounded at 64 entries. Exceeding this limit returns `QuasarError::RemainingAccountsOverflow`.
+4. **Stay under 64 remaining accounts.** The iterator cache is bounded at 64 entries.
 
-5. **Use stack-allocated collection buffers.** The multisig example demonstrates the pattern: a `MaybeUninit` array on the stack, filled by the iterator, with a bounded count. This avoids heap allocation entirely.
+5. **Use stack-allocated collection buffers.** The multisig example demonstrates the pattern: a `MaybeUninit` array on the stack, filled by the iterator, with a bounded count.

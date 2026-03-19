@@ -3,7 +3,7 @@ title: Metaplex Metadata
 description: Interacting with the Metaplex Token Metadata program from Quasar.
 ---
 
-The Metaplex Token Metadata program attaches rich metadata (name, symbol, URI, creators, collections) to SPL Token mints. Quasar's `quasar-spl` crate provides zero-copy account types, typed CPI methods, and declarative initialization attributes for working with metadata and master edition accounts. Enable it with the `metadata` feature on `quasar-spl`.
+The Metaplex Token Metadata program attaches metadata (name, symbol, URI, creators, collections) to SPL Token mints. The `quasar-spl` crate provides zero-copy account types, typed CPI methods, and declarative initialization attributes for metadata and master edition accounts. Enable it with the `metadata` feature on `quasar-spl`.
 
 ## Account types
 
@@ -11,7 +11,7 @@ The Metaplex Token Metadata program attaches rich metadata (name, symbol, URI, c
 
 `Account<MetadataAccount>` validates that an account is owned by the Metaplex Token Metadata program (`metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s`), has at least 65 bytes of data, and that the first byte (the Metaplex `Key` discriminant) is `MetadataV1` (4).
 
-It derefs to `MetadataPrefix`, a zero-copy `#[repr(C)]` struct covering the fixed 65-byte header:
+It derefs to `MetadataPrefix`, covering the fixed 65-byte header:
 
 ```rust
 // Fields accessible via zero-copy deref:
@@ -20,7 +20,7 @@ metadata.update_authority()  // &Address
 metadata.mint()              // &Address
 ```
 
-The fields after the prefix -- name, symbol, URI, creators, collection, uses -- are variable-length Borsh-serialized data. The fixed prefix gives you constant-time access to the most commonly needed fields (update authority and mint) without parsing the entire account.
+Fields after the prefix (name, symbol, URI, creators, collection, uses) are variable-length Borsh-serialized data. The fixed prefix gives constant-time access to update authority and mint without parsing the entire account.
 
 ### MasterEditionAccount
 
@@ -37,7 +37,7 @@ edition.max_supply()  // Option<u64> -- None means unlimited
 
 ## The MetadataProgram type
 
-Use `Program<MetadataProgram>` to reference the Metaplex program in your accounts struct. It validates the address and provides all CPI methods through the `MetadataCpi` trait:
+`Program<MetadataProgram>` validates the program address and provides CPI methods through the `MetadataCpi` trait:
 
 ```rust
 use quasar_spl::metadata::MetadataProgram;
@@ -47,7 +47,7 @@ pub metadata_program: &'info Program<MetadataProgram>,
 
 ## Declarative metadata initialization
 
-The most ergonomic way to create metadata is with the declarative `metadata::*` attributes on a mint's `#[account(init)]`:
+Use `metadata::*` attributes on a mint's `#[account(init)]` to create metadata declaratively:
 
 ```rust
 use quasar_spl::{metadata::MetadataProgram, Mint, Token};
@@ -75,12 +75,9 @@ pub struct CreateNft<'info> {
 }
 ```
 
-The generated code performs these steps during account parsing:
+During account parsing, this creates the mint via `System::create_account` + `InitializeMint2`, then calls `create_metadata_accounts_v3` via CPI.
 
-1. Creates the mint via `System::create_account` + `InitializeMint2`.
-2. Calls `create_metadata_accounts_v3` on the Metaplex program via CPI, passing the name, symbol, URI, seller fee, and mutability flag.
-
-The Metaplex program derives the metadata PDA internally (seeds: `["metadata", metadata_program_id, mint_address]`), so the `metadata` account in your struct is an `UncheckedAccount` -- the Metaplex program validates and initializes it.
+The Metaplex program derives the metadata PDA internally (seeds: `["metadata", metadata_program_id, mint_address]`), so the `metadata` account is an `UncheckedAccount`.
 
 ### Attribute reference
 
@@ -92,15 +89,15 @@ The Metaplex program derives the metadata PDA internally (seeds: `["metadata", m
 | `metadata::seller_fee_basis_points` | `u16` | Royalty in basis points (100 = 1%) |
 | `metadata::is_mutable` | `bool` | Whether metadata can be updated later |
 
-The Metaplex program enforces maximum lengths: 32 bytes for name, 10 bytes for symbol, 200 bytes for URI. Quasar validates these limits at CPI build time and panics if exceeded.
+The Metaplex program enforces these maximum lengths. Quasar validates them at CPI build time and panics if exceeded.
 
 ## CPI methods
 
-The `MetadataCpi` trait provides all Metaplex Token Metadata CPI methods. They are grouped into variable-length instructions (which use `BufCpiCall`) and fixed-length instructions (which use `CpiCall`).
+The `MetadataCpi` trait provides all Metaplex Token Metadata CPI methods.
 
 ### Variable-length instructions
 
-These instructions contain Borsh-serialized string fields and use `BufCpiCall<'a, N, 512>`, a stack-allocated CPI call with a 512-byte instruction data buffer.
+These instructions contain variable-length string fields and use `BufCpiCall` with a stack-allocated instruction data buffer.
 
 #### create_metadata_accounts_v3
 
@@ -126,7 +123,7 @@ self.metadata_program
     .invoke()?;
 ```
 
-The string parameters accept any type implementing `CpiEncode<4>`, which covers `&[u8]`, byte string literals (`b"..."`), and `BorshString`. The `CpiEncode` trait writes each string as a Borsh-encoded `String` (4-byte little-endian length prefix followed by UTF-8 bytes) directly into the 512-byte stack buffer.
+String parameters accept `&[u8]`, byte string literals (`b"..."`), and `BorshString`.
 
 #### update_metadata_accounts_v2
 
@@ -289,13 +286,11 @@ self.metadata_program.set_token_standard(
 
 ## BufCpiCall vs CpiCall
 
-Most Metaplex CPI methods use the standard `CpiCall<'a, N, D>` where `D` is the exact instruction data size known at compile time. However, `create_metadata_accounts_v3` and `update_metadata_accounts_v2` contain variable-length string fields (name, symbol, URI), so they use `BufCpiCall<'a, N, 512>`.
-
-`BufCpiCall` allocates a 512-byte buffer on the stack and tracks the actual written length. The Metaplex program's maximum combined string payload (32 + 10 + 200 = 242 bytes plus Borsh overhead) fits comfortably within 512 bytes. The `.invoke()` and `.invoke_signed()` methods work identically -- only the internal data encoding differs.
+Most Metaplex CPI methods use `CpiCall` where the instruction data size is known at compile time. `create_metadata_accounts_v3` and `update_metadata_accounts_v2` contain variable-length string fields, so they use `BufCpiCall` with a stack-allocated buffer instead. The `.invoke()` and `.invoke_signed()` methods work identically for both.
 
 ## InitMetadata and InitMasterEdition traits
 
-For manual initialization outside the declarative attribute system, Quasar provides two extension traits.
+For manual initialization outside the declarative attribute system, use these traits.
 
 ### InitMetadata
 

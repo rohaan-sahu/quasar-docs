@@ -3,22 +3,22 @@ title: QuasarSVM (TypeScript)
 description: Testing Quasar programs with the TypeScript-based QuasarSVM test harness.
 ---
 
-QuasarSVM ships TypeScript bindings for both `@solana/web3.js` and `@solana/kit`. Write Mocha tests in TypeScript that execute your program in a local SVM -- no validator required.
+QuasarSVM provides TypeScript bindings for `@solana/web3.js` and `@solana/kit`. Write Mocha tests that execute your program in a local SVM -- no validator required.
 
 ## Choosing a variant
 
-When you run `quasar init`, you choose between two TypeScript variants:
+`quasar init` offers two TypeScript variants:
 
 | Variant | Package | Best for |
 |---------|---------|----------|
 | **QuasarSVM/Web3.js** | `@solana/web3.js` | Teams already using web3.js v2 |
 | **QuasarSVM/Kit** | `@solana/kit` | New projects using the Solana Kit SDK |
 
-Both variants share the same underlying SVM execution engine. The difference is in how you construct accounts and instructions.
+Both use the same SVM execution engine. The difference is how you construct accounts and instructions.
 
 ## Setup: Web3.js variant
 
-`quasar init` generates the full scaffolding. The key files are:
+`quasar init` generates the scaffolding. Key files:
 
 **package.json**
 ```json
@@ -41,7 +41,7 @@ Both variants share the same underlying SVM execution engine. The difference is 
 }
 ```
 
-Install dependencies after scaffolding:
+Then install dependencies:
 
 ```bash
 npm install
@@ -60,11 +60,11 @@ The Kit variant uses `@solana/kit` instead:
 }
 ```
 
-The test API is slightly different -- Kit uses `address()` and `lamports()` helpers instead of `Keypair` and raw bigints.
+Kit uses `address()` and `lamports()` helpers instead of `Keypair` and raw bigints.
 
 ## Writing tests with Web3.js
 
-The generated test file imports the auto-generated TypeScript client from `target/client/typescript/` and creates a `QuasarSvm` instance:
+Import the generated client from `target/client/typescript/` and create a `QuasarSvm` instance:
 
 ```typescript
 import { Keypair, SystemProgram, KeyedAccountInfo } from "@solana/web3.js";
@@ -110,10 +110,10 @@ describe("MyProgram", async () => {
 });
 ```
 
-### Key concepts
+### Key types
 
-- **`QuasarSvm`** -- The local VM instance. Call `.addSystemProgram()` to include the system program, and `.addProgram()` to load your compiled binary.
-- **`processInstruction`** -- Executes a single instruction against the provided accounts and returns a result with `status`, `logs`, and updated account state.
+- **`QuasarSvm`** -- The local VM instance. `.addSystemProgram()` includes the system program; `.addProgram()` loads your compiled binary.
+- **`processInstruction`** -- Executes a single instruction and returns `status`, `logs`, and updated account state.
 - **`KeyedAccountInfo`** -- Pairs an account address with its initial state (lamports, data, owner).
 
 ## Writing tests with Kit
@@ -163,15 +163,15 @@ describe("MyProgram", async () => {
 });
 ```
 
-The main differences from Web3.js:
-- Uses `generateKeyPairSigner()` instead of `Keypair.generate()`
-- Account addresses are accessed via `.address` rather than `.publicKey`
-- Uses typed `lamports()` and `address()` helpers
-- The program address is imported as `PROGRAM_ADDRESS` from the generated client
+Differences from Web3.js:
+- `generateKeyPairSigner()` instead of `Keypair.generate()`
+- `.address` instead of `.publicKey`
+- Typed `lamports()` and `address()` helpers
+- `PROGRAM_ADDRESS` imported from the generated client
 
-## Sending transactions
+## Processing instructions
 
-Both variants use `processInstruction()` for single-instruction execution. The result object contains:
+Both variants use `processInstruction()`. The result contains:
 
 - **`status.ok`** -- Boolean indicating success or failure
 - **`logs`** -- Array of program log lines (useful for debugging)
@@ -189,7 +189,7 @@ console.log("CU used:", result.computeUnitsConsumed);
 
 ## Account deserialization
 
-The generated TypeScript client includes deserialization functions for your program's account types. After executing an instruction, deserialize the resulting account data:
+The generated client includes deserialization functions for your account types:
 
 ```typescript
 const result = vm.processInstruction(depositInstruction, accounts);
@@ -205,7 +205,7 @@ const vaultData = result.accounts[1].data;
 quasar test
 ```
 
-This builds the program, generates the TypeScript client, installs npm dependencies if needed, and runs `mocha`. Test results are parsed from Mocha's JSON reporter for structured terminal output.
+Builds the program, generates the TypeScript client, installs dependencies if needed, and runs `mocha`.
 
 Filter tests:
 
@@ -221,10 +221,10 @@ npx mocha --require tsx --delay tests/*.test.ts
 
 ## Watch mode
 
-For fast iteration, use watch mode to rebuild and re-run tests on every source change:
+Rebuild and re-run tests on every source change:
 
 ```bash
 quasar test --watch
 ```
 
-This watches the `src/` directory and automatically rebuilds the program, regenerates the client, and re-runs the test suite when files change.
+Rebuilds, regenerates the client, and re-runs tests on every source change.

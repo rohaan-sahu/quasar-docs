@@ -3,11 +3,11 @@ title: Flamegraphs
 description: Interactive flamegraph viewer for compute unit analysis.
 ---
 
-When you run `quasar profile`, the profiler generates a JSON profile. If the frontend assets are present in the profile web root (an `index.html` file), it also starts a local HTTP server serving the interactive flamegraph viewer. This gives you a visual breakdown of where compute units are spent in your program.
+`quasar profile` generates a JSON profile and starts a local HTTP server with an interactive flamegraph viewer showing where compute units are spent.
 
-## Accessing the Flamegraph
+## Accessing the flamegraph
 
-After profiling, the CLI prints a link:
+After profiling, the CLI prints a URL:
 
 ```
   my_program  2,816 CU
@@ -18,90 +18,73 @@ After profiling, the CLI prints a link:
   flamegraph  http://127.0.0.1:7777/?program=my_program
 ```
 
-Open the URL in your browser to view the interactive flamegraph.
+Open the URL in your browser to view the flamegraph.
 
-## How the Server Works
+## How the server works
 
-The flamegraph viewer runs as a lightweight HTTP server on port 7777. It is designed to stay out of your way:
+The flamegraph viewer runs on port 7777:
 
-- **Background process** -- The server forks into the background via `fork()` and detaches with `setsid()`, so your terminal stays free.
-- **Auto-shutdown** -- After 30 seconds of inactivity (no new TCP connections), the server shuts itself down. If no connection ever arrives, it gives up after 60 seconds.
-- **Port reuse** -- If port 7777 is already in use from a previous profile, the profiler detects the existing server via a TCP connect probe and prints the link without starting a new one.
-- **Static file serving** -- The server serves the frontend SPA, profile JSON files, and directory listings from the profile web root.
+- **Background process** -- Forks into the background so your terminal stays free.
+- **Auto-shutdown** -- Shuts down after 30 seconds of inactivity.
+- **Port reuse** -- If port 7777 is already in use, the profiler reuses the existing server.
 
-For `--diff` mode, the server runs in blocking mode (foreground) and stays alive until you press Ctrl-C, since the diff view requires ongoing interaction.
+For `--diff` mode, the server runs in the foreground until you press Ctrl-C.
 
-## Reading a Flamegraph
+## Reading a flamegraph
 
 A flamegraph is a stacked bar chart where:
 
-- **Each bar represents a function** in the call stack
 - **Width represents cost** -- wider bars consumed more compute units
-- **Vertical stacking represents call depth** -- the bottom bar is the entrypoint, and each bar above is a function called by the one below
-- **Colors** are used for visual distinction and do not carry semantic meaning
+- **Vertical stacking represents call depth** -- bottom is the entrypoint, each bar above is called by the one below
+- **Colors** are for visual distinction only
 
-### What to Look For
+### What to look for
 
-1. **Wide bars at the top** -- These are leaf functions that consume the most CU directly. They are your primary optimization targets.
+1. **Wide bars at the top** -- Leaf functions consuming the most CU. Primary optimization targets.
+2. **Wide bars at the bottom** -- High total cost. Look at children to find what contributes most.
+3. **Plateaus** -- A function as wide as its parent means the parent does nothing besides calling that child.
+4. **Many thin bars** -- Small calls that add up. Consider inlining or eliminating.
 
-2. **Wide bars at the bottom** -- If the entrypoint or a wrapper function is wide, it means the total program cost is high. Look at its children to find what contributes most.
+### Interaction
 
-3. **Plateaus** -- A function that is as wide as its parent means the parent does nothing besides calling that child. The cost is entirely in the child.
+- **Click** a bar to zoom into that subtree.
+- **Hover** to see function name, CU count, and percentage.
+- **Click the root** or breadcrumb to zoom back out.
 
-4. **Many thin bars** -- Lots of small function calls can add up. Consider whether some can be inlined or eliminated.
+## Profile history
 
-### Interacting with the Flamegraph
-
-- **Click** on a bar to zoom into that function's subtree
-- **Hover** to see the function name, CU count, and percentage of total
-- **Click the root** or use the breadcrumb to zoom back out
-
-## Profile History
-
-The flamegraph viewer has access to all profiles stored in `target/profile/profiles/`. Each profile is timestamped:
+All profiles in `target/profile/profiles/` are available in the viewer:
 
 ```
 my_program__2025-03-15-14-30-00-123.profile.json
 my_program__2025-03-15-14-35-22-456.profile.json
 ```
 
-You can select different profiles from the viewer to see how your program's CU usage has changed over time.
+Select different profiles to compare CU usage over time.
 
-## Diff View
+## Diff view
 
-When you run `quasar profile --diff <PROGRAM_NAME>`, the profiler prints a URL with `&view=diff` and starts the server in blocking (foreground) mode:
+`quasar profile --diff` starts the server in the foreground with a diff overlay:
 
 ```bash
 quasar profile --diff my_program
 ```
 
-Open the printed URL in your browser. The diff view overlays two flamegraphs, highlighting functions that changed. This is useful for:
+The diff view overlays two flamegraphs, highlighting functions that changed between runs. Press Ctrl-C to stop.
 
-- Comparing CU usage before and after an optimization
-- Verifying that a refactor did not regress performance
-- Benchmarking your local build against a previous profile
+## Sharing flamegraphs
 
-The `--diff` server runs in the foreground. Press Ctrl-C to stop it when you are done.
-
-## Sharing Flamegraphs
-
-To share a profile with your team, use the `--share` flag:
+Upload a profile to a public GitHub Gist:
 
 ```bash
 quasar profile --share
 ```
 
-This uploads the profile JSON to a public GitHub Gist using the `gh` CLI. The gist URL is printed to the terminal:
+Requires `gh` to be installed and authenticated (`gh auth login`). The gist URL is printed to the terminal.
 
-```
-  https://gist.github.com/username/abc123...
-```
+## Profile JSON format
 
-Anyone with the URL can download the profile JSON. This requires `gh` to be installed and authenticated (`gh auth login`).
-
-## Understanding the Profile JSON
-
-Each profile JSON file contains a hierarchical frame tree:
+Each profile JSON contains a hierarchical frame tree:
 
 ```json
 {
@@ -123,16 +106,14 @@ Each profile JSON file contains a hierarchical frame tree:
 }
 ```
 
-- **`value`** -- The CU count for that node (inclusive of all children in the folded-stack accounting)
+- **`value`** -- CU count for that node (inclusive of children)
 - **`children`** -- Nested function calls, sorted by value descending
-- **`binaryHash`** -- SHA-256 of the ELF binary, useful for verifying which build was profiled
+- **`binaryHash`** -- SHA-256 of the ELF binary, for verifying which build was profiled
 - **`binarySize`** -- Size of the compiled `.so` file in bytes
-
-The folded stacks are built by walking every instruction in the `.text` section and resolving each instruction's address to a function name via DWARF debug info. The profiler attributes each instruction to the innermost (leaf) function for the per-function table, while the full call stack is preserved for the flamegraph.
 
 ## Workflow
 
-A typical profiling workflow looks like this:
+Typical profiling workflow:
 
 ```bash
 # 1. Profile (auto-builds with debug symbols if needed)
@@ -149,10 +130,4 @@ quasar profile
 # 5. Repeat until satisfied with CU usage
 ```
 
-For continuous iteration, use watch mode:
-
-```bash
-quasar profile --watch
-```
-
-This re-profiles on every source file change, letting you see the CU impact of each edit immediately in the terminal output.
+For continuous iteration, use `quasar profile --watch` to re-profile on every source change.

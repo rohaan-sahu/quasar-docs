@@ -3,17 +3,16 @@ title: Build a Multisig
 description: Step-by-step guide to building a multisig wallet program with Quasar.
 ---
 
-This guide builds a multisig wallet program with Quasar. A multisig requires M-of-N signers to approve a transfer before it executes. The program uses dynamic account fields (`String` and `Vec`), remaining accounts for variable-length signer lists, and PDA-signed transfers from a shared vault.
+Build an M-of-N multisig wallet using dynamic account fields (`String` and `Vec`), remaining accounts for variable-length signer lists, and PDA-signed transfers.
 
-By the end, you will understand how to:
+You will learn to:
 
 - Define accounts with dynamic fields (zero-copy `String` and `Vec`)
-- Use `CtxWithRemaining` to accept a variable number of accounts
-- Iterate over remaining accounts and validate signers
-- Perform threshold-based authorization logic
+- Use `CtxWithRemaining` for variable-length account lists
+- Validate signers and enforce threshold authorization
 - Mutate dynamic fields on existing accounts
 
-This guide assumes familiarity with the patterns covered in [Build a Vault](/docs/guides/build-a-vault) and [Build an Escrow](/docs/guides/build-an-escrow).
+Assumes familiarity with [Build a Vault](/docs/guides/build-a-vault) and [Build an Escrow](/docs/guides/build-an-escrow).
 
 ## Project setup
 
@@ -37,7 +36,7 @@ solana-address = { version = "2.2.0" }
 solana-instruction = { version = "3.2.0" }
 ```
 
-No SPL dependencies are needed -- this multisig manages only SOL lamports.
+No SPL dependencies -- this multisig manages only SOL.
 
 ## File structure
 
@@ -55,7 +54,7 @@ src/
 
 ## Defining the multisig state
 
-The multisig configuration account has both fixed and dynamic fields. Here is `state.rs`:
+`state.rs`:
 
 ```rust
 use quasar_lang::prelude::*;
@@ -71,17 +70,17 @@ pub struct MultisigConfig<\'a> {
 ```
 
 **Fixed fields** come first:
-- **`creator`** -- The 32-byte address of the multisig creator.
-- **`threshold`** -- How many signers are required to approve a transfer (the "M" in M-of-N).
-- **`bump`** -- The PDA bump seed for the config account.
+- **`creator`** -- The multisig creator's address.
+- **`threshold`** -- Required approvals (the "M" in M-of-N).
+- **`bump`** -- PDA bump seed.
 
-**Dynamic fields** come after the fixed fields:
-- **`label: String<\'a, 32>`** -- A human-readable label for the multisig (e.g., "Treasury"). The `32` is the maximum byte length. `String` is Quasar\'s zero-copy string type -- it is stored as a 4-byte length prefix followed by the UTF-8 bytes, directly in the account data buffer.
-- **`signers: Vec<\'a, Address, 10>`** -- The list of authorized signer addresses. The `10` is the maximum number of elements. Like `String`, this is stored as a 4-byte count prefix followed by the elements.
+**Dynamic fields** follow:
+- **`label: String<\'a, 32>`** -- Human-readable label (max 32 bytes). Stored as a 4-byte length prefix followed by UTF-8 bytes, directly in the account buffer.
+- **`signers: Vec<\'a, Address, 10>`** -- Authorized signer addresses (max 10). Stored as a 4-byte count prefix followed by elements.
 
-The `\'a` lifetime ties the dynamic fields to the account\'s data buffer. The data is read and written in place -- no heap allocation, no copying. This is the zero-copy design in action. For more on dynamic field layout, see [Dynamic Fields](/docs/zero-copy/dynamic-fields).
+The `\'a` lifetime ties dynamic fields to the account's data buffer -- read and written in place with no heap allocation. See [Dynamic Fields](/docs/zero-copy/dynamic-fields).
 
-The on-disk layout looks like:
+On-disk layout:
 
 ```
 [disc: 1B][creator: 32B][threshold: 1B][bump: 1B]
@@ -89,11 +88,11 @@ The on-disk layout looks like:
 [signers_count: 4B][signers_data: 0-320B]
 ```
 
-Because dynamic fields can vary in size, the account\'s total size depends on the actual content. Quasar handles the allocation and reallocation automatically.
+Account size varies with content. Quasar handles allocation and reallocation automatically.
 
 ## The program entrypoint
 
-Here is the complete `lib.rs`:
+`lib.rs`:
 
 ```rust
 #![no_std]
@@ -137,16 +136,11 @@ mod quasar_multisig {
 }
 ```
 
-Two of the four instructions use `CtxWithRemaining<T>` instead of `Ctx<T>`:
+`create` and `execute_transfer` use `CtxWithRemaining<T>` instead of `Ctx<T>` because the number of signers varies per transaction. `ctx.remaining_accounts()` returns an iterator over accounts beyond those in the struct. See [Remaining Accounts](/docs/features/remaining-accounts).
 
-- **`create`** uses remaining accounts to pass the initial signers. The number of signers is not known at compile time, so they cannot be part of the fixed accounts struct.
-- **`execute_transfer`** uses remaining accounts to pass the approving signers. Different transactions may have different subsets of signers.
+`set_label` takes a `String<32>` -- deserialized directly from instruction data as a 4-byte length prefix plus UTF-8 bytes.
 
-The `ctx.remaining_accounts()` method returns a `RemainingAccounts` iterator that walks through any accounts beyond those declared in the struct. For more on this pattern, see [Remaining Accounts](/docs/features/remaining-accounts).
-
-Also notice that `set_label` takes a `String<32>` argument. This is Quasar\'s zero-copy string type deserialized directly from the instruction data -- a 4-byte length prefix followed by UTF-8 bytes, with a maximum of 32 bytes.
-
-The `instructions/mod.rs` re-exports all four modules:
+`instructions/mod.rs`:
 
 ```rust
 pub mod create;
@@ -164,7 +158,7 @@ pub use execute_transfer::*;
 
 ## The create instruction
 
-The create instruction sets up the multisig config account and records the initial signers. Here is `instructions/create.rs`:
+`instructions/create.rs`:
 
 ```rust
 use {
@@ -182,7 +176,7 @@ pub struct Create<\'info> {
 }
 ```
 
-The config account uses `init` with PDA seeds `[b"multisig", creator]`, so each creator gets exactly one multisig. Note the `Account<MultisigConfig<\'info>>` type (not a reference) -- this is needed for accounts with dynamic fields because the framework needs ownership to manage potential reallocation.
+PDA seeds `[b"multisig", creator]` give each creator one multisig. Note `Account<MultisigConfig<\'info>>` (not a reference) -- required for dynamic fields because the framework needs ownership to manage reallocation.
 
 ### The handler
 
@@ -230,26 +224,17 @@ impl<\'info> Create<\'info> {
 }
 ```
 
-**Collecting signer addresses from remaining accounts.** We iterate over `remaining.iter()`, which yields each account beyond the four declared in the struct. For each account:
+The handler iterates `remaining.iter()`, which yields accounts beyond those in the struct. For each: check the 10-signer cap, verify `is_signer()` (prevents registering arbitrary addresses), and store the address in a stack-allocated array.
 
-1. We check we have not exceeded the maximum of 10 signers.
-2. We verify the account is a signer (`is_signer()`). Every signer must have actually signed the transaction -- this prevents someone from registering arbitrary addresses.
-3. We store the address in a stack-allocated array.
+The `MaybeUninit` array avoids heap allocation -- safe because `count` tracks initialization.
 
-The `MaybeUninit` and `unsafe` blocks are a performance optimization. Instead of using a heap-allocated `Vec`, we allocate a fixed-size array on the stack and initialize elements one by one. This is safe because we track `count` carefully and never read uninitialized elements.
+Threshold must be at least 1 and at most the signer count: zero would allow unapproved transfers, and exceeding the count would block all transfers.
 
-**Threshold validation.** The threshold must be at least 1 and at most equal to the number of signers. A threshold of 0 would allow transfers with no approval. A threshold larger than the signer count would make transfers impossible.
-
-**Writing the config.** The `set_inner` method writes all fields to the account. For accounts with dynamic fields, it takes additional arguments:
-
-- An account view (the payer) that provides lamports for any account reallocation.
-- An optional `Rent` sysvar reference for rent-exempt calculation.
-
-This is because setting dynamic fields may change the total account size, requiring reallocation funded by the payer.
+`set_inner` for dynamic accounts takes a payer (for reallocation lamports) and optional `Rent` reference, since dynamic fields may change account size.
 
 ## The deposit instruction
 
-Depositing SOL into the multisig vault is straightforward. Here is `instructions/deposit.rs`:
+`instructions/deposit.rs`:
 
 ```rust
 use {crate::state::MultisigConfig, quasar_lang::prelude::*};
@@ -273,17 +258,15 @@ impl<\'info> Deposit<\'info> {
 }
 ```
 
-A few things to note:
+- **Anyone can deposit** -- the `depositor` need not be a configured signer.
+- **Vault PDA** seeded with `[b"vault", config]`, tying it to this multisig.
+- **Config is read-only** here, included for PDA seed validation.
 
-- **Anyone can deposit.** The `depositor` is just a `Signer` -- it does not need to be the creator or one of the configured signers.
-- **The vault PDA** is seeded with `[b"vault", config]`, meaning the vault address is derived from the config account\'s address. This ties the vault to a specific multisig.
-- **The config is read-only** here. We include it so the framework can validate the vault PDA seeds.
-
-The deposit follows the same pattern as the [vault guide](/docs/guides/build-a-vault) -- a system program transfer CPI.
+Same pattern as the [vault guide](/docs/guides/build-a-vault) -- a system program transfer CPI.
 
 ## The execute_transfer instruction
 
-This is the core of the multisig: verify that enough signers have approved, then transfer SOL from the vault. Here is `instructions/execute_transfer.rs`:
+Verify enough signers have approved, then transfer SOL from the vault. `instructions/execute_transfer.rs`:
 
 ```rust
 use {
@@ -348,11 +331,11 @@ impl<\'info> ExecuteTransfer<\'info> {
 }
 ```
 
-The authorization logic works as follows: load the stored signer list from the config, count how many remaining accounts are both signers and in the stored list, check against the threshold, and if met, execute the transfer using `invoke_signed` with the vault PDA\'s signer seeds.
+Load the stored signer list, count how many remaining accounts are both transaction signers and in the list, check against the threshold, and if met, execute the transfer with `invoke_signed`.
 
 ## The set_label instruction
 
-The multisig can have a human-readable label that the creator can update. Here is `instructions/set_label.rs`:
+`instructions/set_label.rs`:
 
 ```rust
 use {crate::state::MultisigConfig, quasar_lang::prelude::*};
@@ -378,11 +361,11 @@ impl<\'info> SetLabel<\'info> {
 }
 ```
 
-Only the creator can update the label (`has_one = creator` + `Signer`). The `set_label` method is generated by the `#[account]` macro for accounts with dynamic fields. It handles reallocation transparently if the new label changes the account size.
+Only the creator can update (`has_one = creator` + `Signer`). `set_label` is generated by `#[account]` and handles reallocation if the new value changes account size.
 
 ## Testing
 
-Add the test dependencies:
+Test dependencies:
 
 ```toml
 [dev-dependencies]
@@ -392,9 +375,9 @@ solana-address = { version = "2.2.0", features = ["decode"] }
 solana-instruction = { version = "3.2.0", features = ["bincode"] }
 ```
 
-The test suite covers all four instructions including threshold enforcement (both success with enough signers and failure with insufficient signers), label storage, and invalid UTF-8 rejection.
+Tests cover all four instructions: threshold enforcement (success and failure), label storage, and invalid UTF-8 rejection.
 
-Run the tests with:
+Run tests:
 
 ```bash
 cargo test-sbf
@@ -402,15 +385,13 @@ cargo test-sbf
 
 ## Summary
 
-The multisig program showcases several advanced Quasar features:
+- **Dynamic fields** -- `String` and `Vec` stored directly in account data with zero-copy access.
+- **Remaining accounts** -- `CtxWithRemaining<T>` accepts variable-length account lists.
+- **Threshold authorization** -- Counts signer approvals against a stored threshold.
+- **Dynamic field mutation** -- `set_label` updates a string field with automatic reallocation.
+- **PDA-signed transfers** -- Vault transfers require `invoke_signed` with signer seeds.
 
-- **Dynamic fields** -- `String<\'a, 32>` and `Vec<\'a, Address, 10>` are stored directly in the account data buffer with zero-copy access. No heap allocation, no serialization overhead.
-- **Remaining accounts** -- `CtxWithRemaining<T>` and `RemainingAccounts` let instructions accept a variable number of accounts not known at compile time.
-- **Threshold authorization** -- Business logic that counts signer approvals against a stored threshold, combining on-chain state with runtime signer verification.
-- **Dynamic field mutation** -- The `set_label` instruction demonstrates updating a dynamic string field on an existing account, with automatic reallocation.
-- **PDA-signed transfers** -- The vault PDA is controlled by the program, and transfers require `invoke_signed` with the vault\'s signer seeds.
-
-The complete source code is available in the [Quasar repository](https://github.com/quasar-lab/quasar/tree/master/examples/multisig).
+Source code: [examples/multisig](https://github.com/quasar-lab/quasar/tree/master/examples/multisig).
 
 ## Next steps
 

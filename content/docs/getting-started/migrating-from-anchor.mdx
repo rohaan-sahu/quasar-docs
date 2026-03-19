@@ -3,7 +3,7 @@ title: Migrating from Anchor
 description: Step-by-step guide to migrate an existing Anchor program to Quasar.
 ---
 
-Quasar shares Anchor's mental model -- derive macros for accounts, typed contexts for instructions, constraint-based validation. The differences are in the runtime: Quasar is zero-copy and `no_std`, which means no deserialization, no heap allocation, and lower compute unit costs.
+Quasar shares Anchor's mental model -- derive macros for accounts, typed contexts for instructions, constraint-based validation. The key runtime difference: Quasar is zero-copy and `no_std`, so there is no deserialization and no heap allocation.
 
 ## What stays the same
 
@@ -87,8 +87,8 @@ pub struct Escrow {
 Differences:
 
 - **Explicit discriminator.** Account types require `discriminator = N` where at least one byte is non-zero. All-zero discriminators are rejected at compile time.
-- **`Address` instead of `Pubkey`.** `Address` is alignment-1 (`[u8; 32]`). `Pubkey` has alignment 4, incompatible with zero-copy access on unaligned account data. Field access requires no copying or padding.
-- **Zero-copy companion struct.** `#[account]` generates a `#[repr(C)]` companion type (prefixed `Zc`) with Pod fields. `Account<Escrow>` reads data directly from account memory through pointer casts -- no Borsh deserialization.
+- **`Address` instead of `Pubkey`.** `Address` is alignment-1 (`[u8; 32]`), which is required for zero-copy access on unaligned account data.
+- **Zero-copy companion struct.** `#[account]` generates a `#[repr(C)]` companion type (prefixed `Zc`) with Pod fields. `Account<Escrow>` reads data directly from account memory via pointer casts -- no deserialization.
 - **`set_inner()` instead of field assignment.** Writes all fields at once via the zero-copy companion:
 
 ```rust
@@ -199,7 +199,7 @@ self.token_program
     .invoke_signed(&seeds)?;
 ```
 
-Quasar's CPI system uses `CpiCall<'a, ACCTS, DATA>`, a const-generic struct where the number of accounts and data size are known at compile time. Everything stays on the stack -- no heap allocation, no `Vec`, no `AccountInfo` cloning.
+Quasar's CPI uses method-style calls that return a `CpiCall` -- account count and data size are const generics, so everything stays on the stack.
 
 System program CPIs follow the same pattern:
 
@@ -288,7 +288,7 @@ pub enum MyError {
 require!(amount > 0, MyError::InsufficientFunds);
 ```
 
-Syntax is identical. However, Quasar's `#[error_code]` starts variant numbering at 0 by default, not 6000. To match Anchor's convention, set `= 6000` on the first variant explicitly:
+Syntax is identical. Quasar's `#[error_code]` starts variant numbering at 0 by default, not 6000. To match Anchor's convention, set `= 6000` on the first variant:
 
 ```rust
 #[error_code]
@@ -312,13 +312,11 @@ pub enum MyError {
 }
 ```
 
-Quasar defines framework-level errors in `QuasarError` (starting at 3000) for validation failures: `AccountNotInitialized`, `InvalidPda`, `ConstraintViolation`, `HasOneMismatch`, `InvalidDiscriminator`, `AddressMismatch`, etc.
+Framework-level validation errors (`AccountNotInitialized`, `InvalidPda`, `ConstraintViolation`, `HasOneMismatch`, `InvalidDiscriminator`, `AddressMismatch`, etc.) live in `QuasarError`, starting at 3000.
 
 ## `Pubkey` vs `Address`
 
-The most pervasive change. Anchor uses `Pubkey` (alignment 4, 32 bytes). Quasar uses `Address` (alignment 1, 32 bytes).
-
-Solana account data is not guaranteed to be aligned. Anchor copies account data into aligned buffers (deserialization). Quasar accesses data in place (zero-copy), so every field must be alignment-1 to avoid undefined behavior from unaligned reads.
+The most pervasive change. Anchor uses `Pubkey` (alignment 4). Quasar uses `Address` (alignment 1, `[u8; 32]`), which is required for zero-copy access on unaligned account data.
 
 | Anchor | Quasar |
 |---|---|
@@ -326,21 +324,19 @@ Solana account data is not guaranteed to be aligned. Anchor copies account data 
 | `Pubkey::new_unique()` | `Address::new_unique()` (tests only) |
 | `system_program::ID` | `SYSTEM_PROGRAM_ID` |
 
-`Address` supports base58 encoding/decoding and comparison. `keys_eq()` provides optimized 32-byte comparison via four unaligned `u64` word reads with short-circuit on first mismatch.
+`Address` supports base58 encoding/decoding and comparison.
 
 ## `no_std` by default
 
-Anchor programs implicitly use `std`. Quasar programs are `#![no_std]` on-chain (with `std` available during tests via `#![cfg_attr(not(test), no_std)]`).
+Anchor programs use `std`. Quasar programs are `#![no_std]` on-chain (`std` is available during tests via `cfg_attr`).
 
 - No `String`, `Vec`, or `HashMap` from `std`. Quasar provides `String<P, N>` and `Vec<T, P, N>` for dynamic account fields, where `P` is the length-prefix type and `N` is the max capacity.
 - No `println!()` on-chain. Use `log()` (re-exported from `solana_program_log` in the prelude).
 - No `format!()`. Enable the `debug` feature for verbose error messages that include account names and constraint indices.
 
-The compiled program contains no allocator, no panic formatting machinery, and no unused standard library code.
-
 ## Pod types
 
-Alignment-1 wrappers for numeric types, used in the generated `#[repr(C)]` zero-copy companion structs:
+Alignment-1 wrappers for numeric types in the generated zero-copy companion structs:
 
 | Standard type | Pod type |
 |---|---|
@@ -350,7 +346,7 @@ Alignment-1 wrappers for numeric types, used in the generated `#[repr(C)]` zero-
 | `u128` / `i128` | `PodU128` / `PodI128` |
 | `bool` | `PodBool` |
 
-In `#[account]` structs, use standard Rust types (`u64`, `bool`, etc.) -- the macro converts them to Pod types in the generated companion. You only need Pod types when working with the zero-copy layer directly. `u8`, `i8`, and `bool` are already alignment-1 and do not need Pod wrappers.
+In `#[account]` structs, use standard Rust types (`u64`, `bool`, etc.) -- the macro converts them to Pod types in the generated companion. You only need Pod types when working with the zero-copy layer directly.
 
 ## Migration checklist
 
@@ -369,9 +365,9 @@ In `#[account]` structs, use standard Rust types (`u64`, `bool`, etc.) -- the ma
 
 ## Further reading
 
-- [Quickstart](./quickstart) -- If you have not set up Quasar yet.
-- [Account Layout](/docs/zero-copy/account-layout) -- How the zero-copy companion structs work under the hood.
+- [Quickstart](./quickstart) -- Set up Quasar and scaffold a project.
+- [Account Layout](/docs/zero-copy/account-layout) -- How zero-copy companion structs work.
 - [Pod Types](/docs/zero-copy/pod-types) -- Alignment-1 types in detail.
-- [Account Types](/docs/references/account-types) -- Complete reference for `Signer`, `Account<T>`, `Program<T>`, `UncheckedAccount`, `Sysvar<T>`, and more.
-- [Account Constraints](/docs/references/account-constraints) -- Full list of supported constraints.
-- [Build an Escrow](/docs/guides/build-an-escrow) -- See a complete Quasar program with token CPIs, PDAs, events, and tests.
+- [Account Types](/docs/references/account-types) -- `Signer`, `Account<T>`, `Program<T>`, `UncheckedAccount`, `Sysvar<T>`, and more.
+- [Account Constraints](/docs/references/account-constraints) -- Full constraint reference.
+- [Build an Escrow](/docs/guides/build-an-escrow) -- Complete program with token CPIs, PDAs, events, and tests.

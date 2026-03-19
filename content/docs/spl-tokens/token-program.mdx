@@ -3,7 +3,7 @@ title: Token Program
 description: Working with SPL Token accounts using zero-copy access and typed CPI.
 ---
 
-Quasar's `quasar-spl` crate provides zero-copy account wrappers and fully typed CPI methods for the SPL Token program. Token accounts and mints are parsed directly from the SVM input buffer with no deserialization overhead, and every CPI call is stack-allocated with const-generic sizes.
+The `quasar-spl` crate provides zero-copy account wrappers and typed CPI methods for the SPL Token program. Token accounts and mints are parsed directly from the SVM input buffer with no deserialization overhead.
 
 ## Account types
 
@@ -46,11 +46,9 @@ mint.is_initialized()     // bool
 mint.freeze_authority()   // Option<&Address>
 ```
 
-Both structs have alignment 1 and are cast directly from the account data pointer -- no copying, no allocation.
-
 ## Program type and CPI
 
-Use `Program<Token>` to reference the SPL Token program in your accounts struct. It validates the address is the SPL Token program ID and provides all CPI methods through the `TokenCpi` trait:
+Use `Program<Token>` to reference the SPL Token program in your accounts struct. It validates the program ID and provides CPI methods through the `TokenCpi` trait:
 
 ```rust
 use quasar_lang::prelude::*;
@@ -73,7 +71,7 @@ impl<'info> TransferTokens<'info> {
 }
 ```
 
-Every CPI method returns a `CpiCall` with const-generic account and data sizes. The call is not executed until you call `.invoke()` or `.invoke_signed()`, giving you control over PDA signing.
+CPI methods return a `CpiCall` that is not executed until you call `.invoke()` or `.invoke_signed()`.
 
 ## CPI methods
 
@@ -81,7 +79,7 @@ The `TokenCpi` trait provides the following methods on `Program<Token>`, `Progra
 
 ### transfer
 
-Transfers tokens between two accounts. Takes the source, destination, authority, and amount:
+Transfers tokens between two accounts:
 
 ```rust
 self.token_program
@@ -91,7 +89,7 @@ self.token_program
 
 ### transfer_checked
 
-Transfers tokens with mint decimal verification. Requires the mint account and explicit decimals parameter:
+Transfers tokens with mint decimal verification:
 
 ```rust
 self.token_program
@@ -118,7 +116,7 @@ self.token_program
 
 ### burn
 
-Burns tokens from an account, reducing the mint's supply:
+Burns tokens from an account:
 
 ```rust
 self.token_program
@@ -128,7 +126,7 @@ self.token_program
 
 ### approve
 
-Approves a delegate to transfer tokens up to a specified amount:
+Approves a delegate to transfer up to the specified amount:
 
 ```rust
 self.token_program
@@ -148,7 +146,7 @@ self.token_program
 
 ### close_account
 
-Closes a token account and reclaims its lamports to a destination:
+Closes a token account and sends its lamports to a destination:
 
 ```rust
 self.token_program
@@ -182,16 +180,16 @@ pub struct InitTokenAccount<'info> {
 }
 ```
 
-The generated code chains `System::create_account` (allocating 165 bytes) followed by `InitializeAccount3` in two CPIs. The `InitializeAccount3` variant does not require the Rent sysvar account, saving one account slot.
+This chains `System::create_account` followed by `InitializeAccount3`, which does not require the Rent sysvar account.
 
-For conditional initialization, use `init_if_needed`. If the account already exists (owner is not the System program), Quasar validates that the mint and authority match the expected values:
+For conditional initialization, use `init_if_needed`. If the account already exists, Quasar validates that the mint and authority match:
 
 ```rust
 #[account(init_if_needed, payer = maker, token::mint = mint_a, token::authority = escrow)]
 pub vault: &'info mut Account<Token>,
 ```
 
-This pattern is used extensively in the escrow example, where vault token accounts are created on the first `make` instruction.
+The escrow example uses this to create vault token accounts on the first `make` instruction.
 
 ## Initializing mints
 
@@ -209,7 +207,7 @@ pub struct InitMint<'info> {
 }
 ```
 
-The generated code chains `System::create_account` (allocating 82 bytes) followed by `InitializeMint2`. Like `InitializeAccount3`, this variant skips the Rent sysvar.
+This chains `System::create_account` followed by `InitializeMint2`, which skips the Rent sysvar.
 
 ## Closing token accounts
 
@@ -225,7 +223,7 @@ self.vault_ta_a
     .invoke_signed(&seeds)?;
 ```
 
-`TokenClose` is implemented for `Account<Token>`, `Account<Token2022>`, `Account<Mint>`, `Account<Mint2022>`, `Account<AssociatedToken>`, and all their `InterfaceAccount` counterparts. The `.close()` method returns a `CpiCall`, so you choose between `.invoke()` (when the authority is a signer) and `.invoke_signed()` (when the authority is a PDA).
+`TokenClose` is implemented for `Account<Token>`, `Account<Token2022>`, `Account<Mint>`, `Account<Mint2022>`, `Account<AssociatedToken>`, and all `InterfaceAccount` counterparts. Use `.invoke()` when the authority is a signer, or `.invoke_signed()` when it is a PDA.
 
 ## PDA-signed transfers
 
@@ -258,7 +256,7 @@ The `bumps.escrow_seeds()` method is auto-generated by the `#[derive(Accounts)]`
 
 ## Manual initialization
 
-For cases where declarative `#[account(init)]` attributes are not flexible enough, you can use the `InitToken` and `InitMint` traits directly:
+When declarative attributes are not flexible enough, use the `InitToken` and `InitMint` traits directly:
 
 ```rust
 use quasar_spl::InitToken;

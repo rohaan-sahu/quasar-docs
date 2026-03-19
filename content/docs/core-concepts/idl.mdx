@@ -3,11 +3,11 @@ title: IDL Generation
 description: How Quasar generates program interface descriptions and client code from your Rust source.
 ---
 
-The IDL is a JSON file describing your program's interface: instructions, accounts, events, types, and errors. Quasar generates it from your Rust source and uses it to produce TypeScript and Rust client libraries.
+The IDL is a JSON file describing your program's interface: instructions, accounts, events, types, and errors. Generated from your Rust source, it drives TypeScript and Rust client generation.
 
 ## What the IDL Contains
 
-A Quasar IDL file has this top-level structure:
+Top-level structure:
 
 ```json
 {
@@ -27,7 +27,7 @@ A Quasar IDL file has this top-level structure:
 
 ### Instructions
 
-Each instruction entry includes the name, discriminator bytes, accounts with their flags, and typed arguments:
+Each instruction includes name, discriminator bytes, accounts with flags, and typed arguments:
 
 ```json
 {
@@ -57,11 +57,11 @@ Each instruction entry includes the name, discriminator bytes, accounts with the
 }
 ```
 
-PDA seeds are encoded as `const` (literal bytes) or `account` (reference to another account). `writable` and `signer` flags are only present when `true`. Known program addresses (e.g., system program, token program) are included as `address` fields. When the instruction uses `CtxWithRemaining`, `hasRemaining` is set to `true`.
+PDA seeds are encoded as `const` (literal bytes) or `account` (reference to another account). `writable` and `signer` flags appear only when `true`. Known program addresses are included as `address` fields. `CtxWithRemaining` instructions set `hasRemaining: true`.
 
 ### Accounts
 
-Each `#[account]` struct is listed with its discriminator:
+Each `#[account]` struct lists its discriminator:
 
 ```json
 {
@@ -72,7 +72,7 @@ Each `#[account]` struct is listed with its discriminator:
 
 ### Events
 
-Events follow the same pattern as accounts:
+Same pattern as accounts:
 
 ```json
 {
@@ -81,11 +81,11 @@ Events follow the same pattern as accounts:
 }
 ```
 
-Event discriminators are prefixed with `0xFF` on-chain to distinguish them from instruction discriminators in the self-CPI protocol. See [CPI](./cpi) for details on event emission.
+Event discriminators are prefixed with `0xFF` on-chain to distinguish them from instructions. See [CPI](./cpi) for event emission details.
 
 ### Types
 
-Struct types referenced by instructions or accounts appear in the `types` array:
+Struct types referenced by instructions or accounts:
 
 ```json
 {
@@ -106,7 +106,7 @@ Struct types referenced by instructions or accounts appear in the `types` array:
 
 #### Dynamic Field Types
 
-Quasar's zero-copy dynamic fields have dedicated IDL representations:
+Dynamic fields have dedicated IDL representations:
 
 ```json
 { "name": "label", "type": { "string": { "maxLength": 32 } } }
@@ -120,7 +120,7 @@ Quasar's zero-copy dynamic fields have dedicated IDL representations:
 
 ### Errors
 
-`#[error_code]` enum variants are numbered starting from 6000 (or from a custom base if the first variant specifies one). Framework errors (`QuasarError`) start at 3000.
+`#[error_code]` variants are numbered from 0 by default (or from a custom base if the first variant specifies one). Framework errors (`QuasarError`) start at 3000.
 
 ```json
 {
@@ -132,7 +132,7 @@ Quasar's zero-copy dynamic fields have dedicated IDL representations:
 
 ## Supported Primitive Types
 
-The IDL supports these primitive types, which map directly to Rust types:
+Primitive types map directly to Rust:
 
 | IDL Type | Rust Type | Size |
 |----------|-----------|------|
@@ -151,15 +151,13 @@ The IDL supports these primitive types, which map directly to Rust types:
 
 ## Generating the IDL
 
-Use the `quasar idl` CLI command to generate the IDL and client code:
+Generate the IDL and client code:
 
 ```bash
 quasar idl path/to/program
 ```
 
-This parses the program source at compile time and produces several outputs:
-
-### Output Directory Structure
+### Output Structure
 
 ```
 target/
@@ -180,12 +178,10 @@ target/
 
 ### TypeScript Clients
 
-Two flavors:
-
 - **`web3.ts`**: Uses `@solana/web3.js` v2.
 - **`kit.ts`**: Uses `@solana/kit`.
 
-Both include typed instruction builders, account/event type definitions, discriminator constants, and codec functions (with `@solana/codecs` added as a dependency when needed).
+Both include typed instruction builders, account/event type definitions, discriminator constants, and codec functions.
 
 ### Rust Client
 
@@ -209,17 +205,17 @@ let ix: Instruction = DepositInstruction {
 
 ## Compile-Time IDL Consumption with declare_program!
 
-The IDL JSON can be consumed at compile time by `declare_program!` to generate typed CPI helpers:
+`declare_program!` consumes an IDL JSON at compile time to generate typed CPI helpers:
 
 ```rust
 declare_program!(vault_program, "target/idl/quasar_vault.idl.json");
 ```
 
-This reads the IDL at macro expansion time and generates a module with `CpiCall`-returning functions for each instruction. See [CPI](./cpi) for full details on the generated module structure.
+See [CPI](./cpi) for the generated module structure.
 
 ## Discriminator Collision Detection
 
-The `#[program]` macro enforces at compile time that all instruction discriminators are unique and have the same byte length. Event discriminators occupy a separate namespace (prefixed with `0xFF` on-chain) and do not conflict with instruction discriminators.
+All instruction discriminators must be unique and have the same byte length (enforced at compile time). Event discriminators occupy a separate namespace (prefixed with `0xFF`) and do not conflict with instructions.
 
 ## Next Steps
 

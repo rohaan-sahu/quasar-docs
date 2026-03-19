@@ -3,7 +3,7 @@ title: Mollusk
 description: Instruction-level testing with the Mollusk SVM harness.
 ---
 
-[Mollusk](https://github.com/buffalojoec/mollusk) is a lightweight SVM test harness that processes individual instructions in isolation. It is the framework used by the Quasar test suite and is ideal for unit testing individual instructions without the overhead of full transaction processing.
+[Mollusk](https://github.com/buffalojoec/mollusk) is a lightweight SVM test harness that processes individual instructions in isolation, without running a validator.
 
 ## Setup
 
@@ -42,11 +42,11 @@ fn setup() -> Mollusk {
 }
 ```
 
-The second argument is the path to the `.so` file, without the extension. Mollusk loads the binary and creates an isolated SVM environment for testing.
+The second argument is the path to the `.so` file, without the extension.
 
 ## Processing instructions
 
-The core API is `process_instruction`. Pass an `Instruction` and a slice of `(Address, Account)` tuples representing the accounts the instruction will access:
+Pass an `Instruction` and a slice of `(Address, Account)` tuples to `process_instruction`:
 
 ```rust
 use mollusk_svm::{result::ProgramResult as MolluskResult, Mollusk};
@@ -82,11 +82,11 @@ fn test_initialize() {
 }
 ```
 
-The generated client types implement `From<T> for Instruction`, so you convert with `.into()`. The client sets the correct discriminator, account metas (signer/writable flags), and serialized instruction data.
+The generated client types implement `Into<Instruction>`, setting the discriminator, account metas, and serialized instruction data.
 
 ## Asserting on results
 
-The `result` from `process_instruction` contains:
+`process_instruction` returns:
 
 - **`program_result`** -- `MolluskResult::Success` or `MolluskResult::Failure(ProgramError)`
 - **`resulting_accounts`** -- Updated `(Address, Account)` tuples after execution
@@ -98,7 +98,7 @@ The `result` from `process_instruction` contains:
 assert!(result.program_result.is_ok());
 ```
 
-Include a debug message for failures:
+With a message on failure:
 
 ```rust
 assert!(
@@ -120,7 +120,7 @@ assert_eq!(
 );
 ```
 
-Error codes that Quasar programs produce:
+Common Quasar error codes:
 
 | Error | Code | Meaning |
 |-------|------|---------|
@@ -137,7 +137,7 @@ Error codes that Quasar programs produce:
 
 ### Inspecting account state
 
-After execution, read the modified account data:
+Read modified account data after execution:
 
 ```rust
 let result = mollusk.process_instruction(&instruction, &accounts);
@@ -157,7 +157,7 @@ assert!(result.compute_units_consumed < 5_000);
 
 ## Multi-step testing
 
-Feed resulting accounts from one instruction into the next to test multi-step flows. This example mirrors the actual `test_withdraw` in `examples/vault/src/tests.rs`:
+Feed resulting accounts from one instruction into the next:
 
 ```rust
 #[test]
@@ -216,7 +216,7 @@ fn test_deposit_then_withdraw() {
 
 ## Building account data manually
 
-For testing validation logic, construct raw account data to simulate specific states. This pattern comes from the Quasar test suite (`tests/suite/src/account_validation.rs`):
+Construct raw account data to test validation:
 
 ```rust
 use {
@@ -280,8 +280,6 @@ fn test_wrong_owner_rejected() {
 | **Best for** | Unit tests, validation checks, error paths | Integration tests, multi-instruction flows |
 | **System programs** | Manual setup with `keyed_account_for_system_program()` | `.addSystemProgram()` builder |
 
-Use Mollusk for testing individual instructions in isolation -- account validation, constraint checks, error codes, and single-instruction logic. It is the fastest option and gives the most control over account state.
+Use Mollusk for unit-testing individual instructions. Use QuasarSVM for transaction-level integration tests and multi-instruction flows.
 
-Use QuasarSVM for transaction-level behavior, multi-instruction flows, or when you want a higher-level API that more closely mirrors on-chain execution.
-
-Both harnesses are available from Rust. For TypeScript tests, use the QuasarSVM TypeScript bindings.
+Both harnesses are available from Rust. For TypeScript, use the QuasarSVM TypeScript bindings.

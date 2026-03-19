@@ -3,11 +3,11 @@ title: Type Mapping
 description: Mapping between Rust types, zero-copy Pod representations, and IDL/TypeScript types.
 ---
 
-Quasar uses zero-copy account access, which means account data is read directly from the runtime's memory buffer without deserialization. To make this safe and portable, native Rust integer types are mapped to alignment-1 Pod types that store values as little-endian byte arrays.
+Quasar reads account data directly from the runtime's memory buffer without deserialization. Native Rust integer types are mapped to alignment-1 Pod types that store values as little-endian byte arrays.
 
-## Rust Type to Pod Type Mapping
+## Rust to Pod type mapping
 
-When you define an `#[account]` struct, the derive macro generates a companion `#[repr(C)]` struct where each field is mapped to its zero-copy equivalent:
+When you define an `#[account]` struct, the derive macro generates a `#[repr(C)]` companion struct where each field is mapped to its zero-copy equivalent:
 
 | Rust Type | Zero-Copy Type | Size (bytes) | Alignment |
 |-----------|---------------|--------------|-----------|
@@ -24,9 +24,7 @@ When you define an `#[account]` struct, the derive macro generates a companion `
 | `bool` | `PodBool` | 1 | 1 |
 | `Address` | `Address` (no wrapper) | 32 | 1 |
 
-All Pod types have alignment 1, which is critical for zero-copy access. The Solana runtime provides account data in a flat byte buffer with no alignment guarantees, so all types used in `#[repr(C)]` account structs must have alignment 1 to avoid undefined behavior from misaligned pointer casts.
-
-### Example
+All Pod types have alignment 1. The Solana runtime provides account data in a flat byte buffer with no alignment guarantees, so all types in `#[repr(C)]` account structs must have alignment 1.
 
 Given this account definition:
 
@@ -51,7 +49,7 @@ pub struct VaultZc {
 }
 ```
 
-The companion struct has a compile-time assertion that its alignment is 1:
+Alignment is verified at compile time:
 
 ```rust
 const _: () = assert!(core::mem::align_of::<VaultZc>() == 1);
@@ -61,9 +59,9 @@ const _: () = assert!(core::mem::align_of::<VaultZc>() == 1);
 
 ## Pod Types
 
-Pod types are defined in the `quasar_pod` crate and re-exported via `quasar_lang::prelude`. Each is `#[repr(transparent)]` over `[u8; N]`, storing values in little-endian byte order.
+Pod types are defined in `quasar_pod` and re-exported via `quasar_lang::prelude`. Each is `#[repr(transparent)]` over `[u8; N]`, storing values in little-endian byte order.
 
-### Reading Values
+### Reading values
 
 Use `.get()` to extract the native Rust value:
 
@@ -73,9 +71,9 @@ let is_active: bool = vault.is_active.get();
 let slot: u64 = clock.slot.get();
 ```
 
-### Writing Values
+### Writing values
 
-When writing to a mutable account, you can assign native values directly. The `#[account]` macro generates setters that handle the conversion:
+Assign native values directly. The `#[account]` macro generates setters that handle the conversion:
 
 ```rust
 // Direct field access via DerefMut
@@ -85,7 +83,7 @@ vault.is_active = PodBool::from(true);
 
 ### Arithmetic
 
-Pod types implement standard arithmetic operators (`+`, `-`, `*`, `/`, `%`) that work with both Pod and native types:
+Pod types implement `+`, `-`, `*`, `/`, `%` with both Pod and native types:
 
 ```rust
 let a = PodU64::from(100u64);
@@ -98,7 +96,7 @@ let d = a * 2u64;            // PodU64 * u64 -> PodU64
 - **Debug builds:** Panics on overflow (via `checked_*` operations)
 - **Release builds:** Uses wrapping semantics for CU efficiency
 
-For explicit overflow detection in all builds, use the checked methods:
+For explicit overflow detection in all builds:
 
 | Method | Description |
 |--------|-------------|
@@ -118,8 +116,6 @@ let new_balance = balance.checked_add(deposit_amount)
 
 ### Constants
 
-Each Pod type provides:
-
 | Constant | Description |
 |----------|-------------|
 | `ZERO` | The zero value |
@@ -134,7 +130,7 @@ if vault.balance == PodU64::ZERO {
 
 ### Comparisons
 
-Pod types implement `PartialEq`, `Eq`, `PartialOrd`, and `Ord`. You can compare a Pod value directly with its native type:
+Pod types implement `PartialEq`, `Eq`, `PartialOrd`, and `Ord`. Compare directly with native types:
 
 ```rust
 if vault.balance > 100u64 {
@@ -147,7 +143,7 @@ if vault.balance == PodU64::ZERO {
 
 ### PodBool
 
-`PodBool` stores a boolean as a single byte. Any non-zero byte is considered `true` (canonical form is `0x01`).
+Stores a boolean as a single byte. Any non-zero byte is `true` (canonical form is `0x01`).
 
 ```rust
 let active: bool = vault.is_active.get();  // read
@@ -155,9 +151,9 @@ vault.is_active = PodBool::from(true);     // write
 let toggled = !vault.is_active;            // bitwise NOT
 ```
 
-### Bitwise Operations
+### Bitwise operations
 
-Pod integer types support bitwise operators:
+Pod integer types support:
 
 | Operator | Description |
 |----------|-------------|
@@ -172,11 +168,11 @@ Pod integer types support bitwise operators:
 
 ## Discriminator
 
-Every account and instruction type has a discriminator prefix -- a byte sequence written at the start of the account data that identifies the account type.
+Every account and instruction type has a discriminator prefix -- a byte sequence at the start of account data that identifies the type.
 
-### Account Discriminators
+### Account discriminators
 
-Set via the `#[account]` macro:
+Set via `#[account]`:
 
 ```rust
 #[account(discriminator = 1)]
@@ -188,13 +184,12 @@ pub struct Escrow { ... }
 
 Rules:
 - At least one byte is required
-- At least one byte must be non-zero (all-zero discriminators are rejected at compile time, since they are indistinguishable from uninitialized account data)
-- Single values are stored as a one-byte discriminator
-- Arrays support multi-byte discriminators
+- At least one byte must be non-zero (all-zero discriminators are rejected at compile time, since they match uninitialized data)
+- Single values use a one-byte discriminator; arrays support multi-byte discriminators
 
-### Instruction Discriminators
+### Instruction discriminators
 
-Set via the `#[instruction]` macro:
+Set via `#[instruction]`:
 
 ```rust
 #[instruction(discriminator = 0)]
@@ -208,17 +203,17 @@ Instruction discriminators can be zero. The `quasar new instruction` command aut
 
 ---
 
-## Calculating Account Space
+## Calculating account space
 
-Total account space is calculated as:
+Total account space:
 
 ```
 space = discriminator_size + fixed_fields_size + dynamic_prefix_bytes + dynamic_data_bytes
 ```
 
-### Fixed-Size Accounts
+### Fixed-size accounts
 
-For accounts with only fixed-width fields, the `Space` trait provides a compile-time constant:
+For accounts with only fixed-width fields, `Space` provides a compile-time constant:
 
 ```rust
 #[account(discriminator = 1)]
@@ -230,13 +225,7 @@ pub struct Vault {
 // Vault::SPACE = 1 (disc) + 32 + 8 + 1 = 42 bytes
 ```
 
-The formula:
-
-```
-SPACE = discriminator_bytes + sizeof(ZcCompanion)
-```
-
-Where `sizeof(ZcCompanion)` is the sum of all field sizes after Pod mapping:
+The formula is `SPACE = discriminator_bytes + sizeof(ZcCompanion)`, where `sizeof(ZcCompanion)` is the sum of all field sizes after Pod mapping:
 
 | Field | Pod Type | Size |
 |-------|----------|------|
@@ -246,9 +235,9 @@ Where `sizeof(ZcCompanion)` is the sum of all field sizes after Pod mapping:
 | **Total fields** | | **41** |
 | **+ discriminator (1 byte)** | | **42** |
 
-### Dynamic Accounts
+### Dynamic accounts
 
-For accounts with `String` or `Vec` fields, space is variable. The macro provides `MIN_SPACE` and `MAX_SPACE` constants:
+For accounts with `String` or `Vec` fields, space is variable. The macro provides `MIN_SPACE` and `MAX_SPACE`:
 
 ```rust
 #[account(discriminator = 5)]
@@ -261,7 +250,7 @@ pub struct Profile<'a> {
 // Profile::MAX_SPACE = 36 + 64 + 320 = 420 bytes
 ```
 
-Dynamic field storage:
+Dynamic field layout:
 
 | Field Type | Prefix | Data Bytes |
 |------------|--------|------------|
@@ -274,7 +263,7 @@ Dynamic field storage:
 | `&str` (tail) | none | remaining bytes |
 | `&[u8]` (tail) | none | remaining bytes |
 
-The `String` and `Vec` types are marker types that configure the wire format:
+`String` and `Vec` are marker types that configure the wire format:
 
 ```rust
 // String<P, MAX> where P = prefix type, MAX = max byte length
@@ -287,9 +276,9 @@ pub members: Vec<Address>,           // Vec<Address, u32, 8> (defaults)
 pub scores: Vec<PodU64, u8, 4>,     // u8 prefix, max 4 elements
 ```
 
-### Tail Fields
+### Tail fields
 
-A tail field (`&str` or `&[u8]`) consumes all remaining bytes in the account data with no length prefix. It must be the last dynamic field. Maximum size is 1024 bytes.
+A tail field (`&str` or `&[u8]`) consumes all remaining bytes with no length prefix. Must be the last dynamic field. Maximum size is 1024 bytes.
 
 ```rust
 #[account(discriminator = 5)]
@@ -299,9 +288,9 @@ pub struct Note<'a> {
 }
 ```
 
-### Space Override
+### Space override
 
-Use `space = <expr>` on `init` to override the computed space:
+Use `space = <expr>` on `init` to override computed space:
 
 ```rust
 #[account(init, payer = payer, space = 8 + 32 + 4 + name.len())]
@@ -310,9 +299,9 @@ pub profile: &'info mut Account<Profile<'info>>,
 
 ---
 
-## IDL Type Mapping
+## IDL type mapping
 
-The IDL generator maps Rust types to IDL primitive names, which the TypeScript client generator then maps to TypeScript types and codec functions.
+The IDL generator maps Rust types to IDL primitives, which the TypeScript client generator maps to TypeScript types and codecs.
 
 ### Rust to IDL to TypeScript
 
