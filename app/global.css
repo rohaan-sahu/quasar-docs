@@ -1,89 +1,98 @@
-@import 'tailwindcss';
-@import 'fumadocs-ui/css/neutral.css';
-@import 'fumadocs-ui/css/preset.css';
+/* Fonts — Funnel Display for headings, Fira Code for code */
+@import url("https://fonts.googleapis.com/css2?family=Funnel+Display:wght@300..800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap");
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
 
-/* Blueshift design system overrides */
-:root.dark {
-  /* Backgrounds */
-  --background: 220 20% 5%; /* #0B0E14 */
-  --foreground: 225 25% 95%; /* #EFF1F6 */
-  --muted: 220 15% 13%; /* #1A1E26 */
-  --muted-foreground: 222 15% 43%; /* #585E6C */
-  --card: 220 17% 11%; /* ~#161A22 */
-  --card-foreground: 225 25% 95%;
-  --popover: 220 17% 11%;
-  --popover-foreground: 225 25% 95%;
-  --border: 220 12% 20%;
-  --input: 220 12% 20%;
 
-  /* Accent — Blueshift cyan */
-  --primary: 180 97% 82%; /* #a9fefe */
-  --primary-foreground: 220 20% 5%;
-  --accent: 180 97% 82%;
-  --accent-foreground: 220 20% 5%;
-  --ring: 180 97% 82%;
-
-  /* Secondary */
-  --secondary: 220 17% 15%;
-  --secondary-foreground: 222 25% 78%; /* #ADB9D2 */
-
-  /* Sidebar */
-  --fd-sidebar-width: 260px;
+@theme {
+  --font-sans: "Funnel Display", ui-sans-serif, system-ui, sans-serif;
+  --font-content: "Aspekta", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, monospace;
+  --color-fd-background: hsl(240, 10%, 6%);
+  --color-fd-foreground: hsl(240, 15%, 95%);
+  --color-fd-muted: hsl(240, 10%, 10%);
+  --color-fd-muted-foreground: hsl(240, 16%, 75%);
+  --color-fd-popover: hsl(240, 10%, 9%);
+  --color-fd-popover-foreground: hsl(240, 14%, 90%);
+  --color-fd-card: hsl(240, 10%, 9%);
+  --color-fd-card-foreground: hsl(240, 15%, 95%);
+  --color-fd-primary: hsl(180, 100%, 70%);
+  --color-fd-primary-foreground: hsla(240, 9%, 9%);
+  --color-fd-secondary: hsla(240, 10%, 15%, 1);
+  --color-fd-secondary-foreground: hsla(180, 100%, 80%);
+  --color-fd-accent: hsla(240, 15%, 12%);
+  --color-fd-accent-foreground: hsla(180, 100%, 80%);
+  --color-fd-border: hsl(240, 10%, 15%);
+  --color-fd-ring: hsl(180, 100%, 64%);
 }
 
-/* Fonts — Funnel Display for headings, Fira Code for code */
-@import url('https://fonts.googleapis.com/css2?family=Funnel+Display:wght@300..800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap');
+.dark #nd-sidebar {
+  --color-fd-muted: hsla(240, 10%, 10%, 1) !important;
+  --color-fd-secondary: hsla(240, 10%, 15%, 1) !important;
+  --color-fd-muted-foreground: hsla(240, 16%, 75%, 1) !important;
+}
+
+.dark {
+  --color-fd-background: hsl(240, 10%, 6%) !important;
+  --color-fd-foreground: hsl(240, 15%, 95%) !important;
+  --color-fd-muted: hsl(240, 10%, 10%) !important;
+  --color-fd-muted-foreground: hsl(240, 16%, 75%) !important;
+  --color-fd-popover: hsl(240, 10%, 9%) !important;
+  --color-fd-popover-foreground: hsl(240, 14%, 90%) !important;
+  --color-fd-card: hsl(240, 10%, 9%) !important;
+  --color-fd-card-foreground: hsl(240, 15%, 95%) !important;
+  --color-fd-primary: hsl(180, 100%, 70%) !important;
+  --color-fd-primary-foreground: hsla(240, 9%, 9%) !important;
+  --color-fd-secondary: hsla(240, 10%, 15%, 1) !important;
+  --color-fd-secondary-foreground: hsla(180, 100%, 80%) !important;
+  --color-fd-accent: hsla(240, 15%, 12%) !important;
+  --color-fd-accent-foreground: hsla(180, 100%, 80%) !important;
+  --color-fd-border: hsl(240, 10%, 15%) !important;
+  --color-fd-ring: hsl(180, 100%, 64%) !important;
+}
 
 :root {
-  --font-sans: 'Funnel Display', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Fira Code', ui-monospace, monospace;
-  --fd-font-sans: 'Funnel Display', ui-sans-serif, system-ui, sans-serif;
-  --fd-font-mono: 'Fira Code', ui-monospace, monospace;
+  --shiki-light-bg: var(--color-fd-background);
 }
 
 body {
-  font-family: var(--font-sans);
+  font-family: var(--font-content);
 }
 
-code, pre, kbd {
+code,
+pre,
+kbd {
   font-family: var(--font-mono) !important;
 }
 
-/* Sidebar — bold section titles only, normal weight for page links */
-#nd-sidebar p {
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  color: hsl(222 15% 55%);
+h1,
+h2 {
+  font-family: var(--font-sans) !important;
 }
-#nd-sidebar a {
+
+
+#nd-sidebar button {
   font-weight: 400;
 }
 
+p {
+  line-height: 1.6;
+}
+
 /* Cards — 3-column grid on docs landing */
-.grid[class*='grid-cols-2']:has([data-card]) {
+.grid[class*="grid-cols-2"]:has([data-card]) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 @media (max-width: 768px) {
-  .grid[class*='grid-cols-2']:has([data-card]) {
+  .grid[class*="grid-cols-2"]:has([data-card]) {
     grid-template-columns: 1fr;
   }
 }
 
-/* Code block styling — target the Shiki figure wrapper */
-.dark figure.shiki {
-  --shiki-dark-bg: #0d1017 !important;
-  background: #0d1017 !important;
-  border: 1px solid hsl(220 12% 15%);
-}
-.dark figure.shiki pre {
-  background: transparent !important;
-}
 
 /* Inline code */
-.dark :not(pre) > code {
-  background: rgba(169, 254, 254, 0.08);
-  color: #a9fefe;
+:not(pre) > code {
+  @apply text-fd-accent-foreground ;
 }

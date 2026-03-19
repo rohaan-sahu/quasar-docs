@@ -39,8 +39,12 @@ export async function generateMetadata(props: {
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
+  const isIndex = !params.slug || params.slug.length === 0;
+
   return {
-    title: page.data.title,
+    title: isIndex
+      ? { absolute: 'Quasar — Zero-Copy Solana Framework' }
+      : page.data.title,
     description: page.data.description,
   };
 }
