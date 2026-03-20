@@ -23,11 +23,19 @@ Skip all prompts:
 quasar init my-program --toolchain solana --framework quasarsvm-rust --template minimal
 ```
 
-## Project structure
+## Minimal template
+
+Everything in a single file:
+
+```
+my-program/
+├── Cargo.toml
+├── Quasar.toml
+└── src/
+    └── lib.rs
+```
 
 ### src/lib.rs
-
-The minimal template puts everything in a single file:
 
 ```rust
 #![cfg_attr(not(test), no_std)]
@@ -70,40 +78,37 @@ mod my_program {
 - **`&'info Program<System>`** -- Reference to the System program, validated by address.
 - **The `impl` block** -- Business logic. Accounts are already parsed and validated before your code runs.
 
-### Generated keypair
+## Full template
 
-The CLI generates a program keypair at `target/deploy/my-program-keypair.json` and embeds the public key in `declare_id!`.
+Separates concerns into modules:
 
-## Add a new instruction
-
-```bash
-quasar add -i transfer
+```
+my-program/
+├── Cargo.toml
+├── Quasar.toml
+└── src/
+    ├── lib.rs
+    ├── state.rs
+    ├── errors.rs
+    └── instructions/
+        ├── mod.rs
+        └── initialize.rs
 ```
 
-This creates `src/instructions/transfer.rs`, updates `src/instructions/mod.rs`, and adds the instruction to the `#[program]` block in `src/lib.rs` with the next available discriminator.
-
-Generated file:
+### src/lib.rs
 
 ```rust
+#![cfg_attr(not(test), no_std)]
+
 use quasar_lang::prelude::*;
 
-#[derive(Accounts)]
-pub struct Transfer<'info> {
-    pub payer: &'info mut Signer,
-    pub system_program: &'info Program<System>,
-}
+mod errors;
+mod instructions;
+mod state;
+use instructions::*;
 
-impl<'info> Transfer<'info> {
-    #[inline(always)]
-    pub fn transfer(&self) -> Result<(), ProgramError> {
-        Ok(())
-    }
-}
-```
+declare_id!("<YOUR_PROGRAM_ID>");
 
-Updated `lib.rs`:
-
-```rust
 #[program]
 mod my_program {
     use super::*;
@@ -112,15 +117,102 @@ mod my_program {
     pub fn initialize(ctx: Ctx<Initialize>) -> Result<(), ProgramError> {
         ctx.accounts.initialize()
     }
+}
+```
 
-    #[instruction(discriminator = 1)]
-    pub fn transfer(ctx: Ctx<Transfer>) -> Result<(), ProgramError> {
-        ctx.accounts.transfer()
+### src/state.rs
+
+On-chain account types. Each gets an explicit discriminator:
+
+```rust
+use quasar_lang::prelude::*;
+
+#[account(discriminator = 1)]
+pub struct MyAccount {
+    pub authority: Address,
+    pub value: u64,
+}
+```
+
+### src/errors.rs
+
+Custom program errors. Variants auto-map to `ProgramError::Custom(N)` with an offset of 6000:
+
+```rust
+use quasar_lang::prelude::*;
+
+#[error_code]
+pub enum MyError {
+    Unauthorized,
+}
+```
+
+### src/instructions/initialize.rs
+
+Each instruction handler in its own file:
+
+```rust
+use quasar_lang::prelude::*;
+
+#[derive(Accounts)]
+pub struct Initialize<'info> {
+    pub payer: &'info mut Signer,
+    pub system_program: &'info Program<System>,
+}
+
+impl<'info> Initialize<'info> {
+    #[inline(always)]
+    pub fn initialize(&self) -> Result<(), ProgramError> {
+        Ok(())
     }
 }
 ```
 
-The discriminator auto-increments from the highest existing value in the `#[program]` block.
+## Adding to your program
+
+Use `quasar add` to scaffold new components. Flags can be combined:
+
+```bash
+quasar add -i transfer -s vault -e access
+```
+
+### Add an instruction
+
+```bash
+quasar add -i transfer
+```
+
+Creates `src/instructions/transfer.rs`, updates `mod.rs`, and adds the entry to the `#[program]` block with the next available discriminator. Works on both minimal and full projects -- if `src/instructions/` doesn't exist, it creates the directory and wires up the module in `lib.rs`.
+
+### Add a state account
+
+```bash
+quasar add -s vault
+```
+
+Appends a new `#[account]` struct to `src/state.rs` (creates the file if it doesn't exist). Auto-increments the discriminator:
+
+```rust
+#[account(discriminator = 2)]
+pub struct Vault {
+    pub authority: Address,
+}
+```
+
+### Add an error enum
+
+```bash
+quasar add -e access
+```
+
+Appends a new `#[error_code]` enum to `src/errors.rs` (creates the file if it doesn't exist):
+
+```rust
+#[error_code]
+pub enum Access {
+    Unknown,
+}
+```
 
 ## Build the program
 
@@ -128,7 +220,7 @@ The discriminator auto-increments from the highest existing value in the `#[prog
 quasar build
 ```
 
-Runs the build command from `Quasar.toml` and generates the IDL and client code in `target/`.
+Runs the build and generates the IDL and client code in `target/`.
 
 Output: `target/deploy/my_program.so`.
 
@@ -152,46 +244,31 @@ Filter by name:
 quasar test --filter test_initialize
 ```
 
+Pass features through to the build:
+
+```bash
+quasar test --features debug
+```
+
 ## Deploy the program
 
 ```bash
-solana config set --url devnet
-quasar deploy
+quasar deploy --url devnet
 ```
 
-Reads the keypair from `target/deploy/` and deploys the compiled `.so` file. Specify a custom keypair with `quasar deploy --program-keypair ./my-keypair.json`.
+Builds the program, then deploys the compiled `.so` to the specified cluster. Reads the keypair from `target/deploy/`.
 
-## The full template
+Specify a custom payer or program keypair:
 
-The `Full` template adds `src/state.rs` and `src/errors.rs`:
-
-**src/state.rs** -- On-chain account types:
-
-```rust
-use quasar_lang::prelude::*;
-
-#[account(discriminator = 1)]
-pub struct MyAccount {
-    pub authority: Address,
-    pub value: u64,
-}
+```bash
+quasar deploy --url devnet --keypair ./payer.json --program-keypair ./program.json
 ```
 
-**src/errors.rs** -- Custom program errors:
+Skip the build step if you've already built:
 
-```rust
-use quasar_lang::prelude::*;
-
-#[error_code]
-pub enum MyProgramError {
-    #[error("Unauthorized access")]
-    Unauthorized,
-    #[error("Invalid amount")]
-    InvalidAmount,
-}
+```bash
+quasar deploy --url devnet --skip-build
 ```
-
-For a full program with state, errors, and multiple instructions, see [Build a Vault](/docs/guides/build-a-vault).
 
 ## Next steps
 
