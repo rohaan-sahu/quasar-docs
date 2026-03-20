@@ -23,19 +23,25 @@ Skip all prompts:
 quasar init my-program --toolchain solana --framework quasarsvm-rust --template minimal
 ```
 
-## Minimal template
+## Templates
 
-Everything in a single file:
+| | Minimal | Full |
+|---|---------|------|
+| **Use when** | Quick start, prototyping, simple programs | Production programs with multiple instructions |
+| **Structure** | Everything in `src/lib.rs` | `state.rs`, `errors.rs`, `instructions/` modules |
+| **Best for** | Learning Quasar, single-instruction programs | Programs with state, errors, and many handlers |
 
-```
-my-program/
-├── Cargo.toml
-├── Quasar.toml
-└── src/
-    └── lib.rs
-```
+### Minimal
 
-### src/lib.rs
+A single `src/lib.rs` with accounts, logic, and the program entrypoint all in one file. Run `quasar add -i <name>` to split into modules when you outgrow it.
+
+### Full
+
+Separate files for state (`src/state.rs`), errors (`src/errors.rs`), and instructions (`src/instructions/*.rs`). Each instruction handler gets its own file, wired through `mod.rs`.
+
+## Anatomy of a Quasar program
+
+The generated `src/lib.rs` (minimal template):
 
 ```rust
 #![cfg_attr(not(test), no_std)]
@@ -77,96 +83,6 @@ mod my_program {
 - **`&'info mut Signer`** -- Mutable reference to a signer. `mut` means writable; `Signer` requires a signature.
 - **`&'info Program<System>`** -- Reference to the System program, validated by address.
 - **The `impl` block** -- Business logic. Accounts are already parsed and validated before your code runs.
-
-## Full template
-
-Separates concerns into modules:
-
-```
-my-program/
-├── Cargo.toml
-├── Quasar.toml
-└── src/
-    ├── lib.rs
-    ├── state.rs
-    ├── errors.rs
-    └── instructions/
-        ├── mod.rs
-        └── initialize.rs
-```
-
-### src/lib.rs
-
-```rust
-#![cfg_attr(not(test), no_std)]
-
-use quasar_lang::prelude::*;
-
-mod errors;
-mod instructions;
-mod state;
-use instructions::*;
-
-declare_id!("<YOUR_PROGRAM_ID>");
-
-#[program]
-mod my_program {
-    use super::*;
-
-    #[instruction(discriminator = 0)]
-    pub fn initialize(ctx: Ctx<Initialize>) -> Result<(), ProgramError> {
-        ctx.accounts.initialize()
-    }
-}
-```
-
-### src/state.rs
-
-On-chain account types. Each gets an explicit discriminator:
-
-```rust
-use quasar_lang::prelude::*;
-
-#[account(discriminator = 1)]
-pub struct MyAccount {
-    pub authority: Address,
-    pub value: u64,
-}
-```
-
-### src/errors.rs
-
-Custom program errors. Variants auto-map to `ProgramError::Custom(N)` with an offset of 6000:
-
-```rust
-use quasar_lang::prelude::*;
-
-#[error_code]
-pub enum MyError {
-    Unauthorized,
-}
-```
-
-### src/instructions/initialize.rs
-
-Each instruction handler in its own file:
-
-```rust
-use quasar_lang::prelude::*;
-
-#[derive(Accounts)]
-pub struct Initialize<'info> {
-    pub payer: &'info mut Signer,
-    pub system_program: &'info Program<System>,
-}
-
-impl<'info> Initialize<'info> {
-    #[inline(always)]
-    pub fn initialize(&self) -> Result<(), ProgramError> {
-        Ok(())
-    }
-}
-```
 
 ## Adding to your program
 
