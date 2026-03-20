@@ -1,4 +1,4 @@
 {
-  "title": "Clients",
-  "pages": ["typescript", "rust"]
+  "title": "Clients & Testing",
+  "pages": ["typescript", "rust", "testing"]
 }

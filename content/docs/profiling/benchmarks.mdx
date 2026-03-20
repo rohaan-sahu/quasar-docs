@@ -1,197 +1,48 @@
 ---
 title: Benchmarks
-description: CU benchmarks and comparison methodology for Quasar programs.
+description: CU benchmarks and optimization strategies for Quasar programs.
 ---
-
-Quasar programs achieve near-hand-written CU efficiency through zero-copy account access, compile-time code generation, and aggressive inlining. This page covers how to benchmark your own programs and how Quasar compares to other frameworks.
 
 ## Framework Comparison
 
-Using a standard vault program (PDA derivation + system transfer CPI for deposit, direct lamport manipulation for withdraw) as the benchmark:
+Standard vault program (PDA derivation + system transfer CPI for deposit, direct lamport manipulation for withdraw):
 
-| Framework | Deposit CU | Withdraw CU | Notes |
-|-----------|-----------|------------|-------|
-| **Quasar** | **2,816** | **1,618** | Zero-copy, no allocations, compile-time codegen |
-| **Pinocchio** | 2,833 | 1,635 | Hand-optimized, no framework overhead |
-| **Anchor** | ~5,500 | — | Borsh deserialization, runtime checks |
+| Framework | Deposit CU | Withdraw CU |
+|-----------|-----------|------------|
+| **Quasar** | **2,816** | **1,618** |
+| Pinocchio | 2,833 | 1,635 |
+| Anchor | ~5,500 | — |
 
-Both instructions show Quasar at -17 CU compared to hand-written Pinocchio. Quasar achieves this while providing a full framework with derive macros, auto-generated clients, and constraint validation.
+Quasar matches hand-written Pinocchio (-17 CU) while providing derive macros, auto-generated clients, and constraint validation. The gap from Anchor comes from zero-copy vs Borsh deserialization, compile-time codegen vs runtime dispatch, and `no_std` by default.
 
-The difference from Anchor comes primarily from:
+## Measuring CU
 
-1. **Zero-copy vs Borsh** -- Quasar reads account fields directly from memory without deserializing into owned Rust structs. This eliminates allocation and copy overhead.
-2. **Compile-time codegen** -- Account validation, discriminator checks, and signer/mutability verification are generated at compile time as straight-line code rather than runtime trait dispatch.
-3. **No `std`** -- Quasar programs are `no_std` by default, avoiding the standard library overhead entirely.
-
-## How to Benchmark Your Programs
-
-### Using the Profiler
-
-The fastest way to get a CU count is the static profiler:
+**Static profiler** — deterministic instruction count from the binary's `.text` section. Fast iteration, per-function breakdown, but counts all instructions including unreachable branches:
 
 ```bash
 quasar profile
 ```
 
-This automatically runs a profile build (with debug symbols) if needed, then walks the binary's instruction stream and reports the total CU count per function. The output is deterministic -- you get the same number every run for the same binary. You can also pass an ELF path explicitly:
-
-```bash
-quasar profile target/deploy/my_program.so
-```
-
-### Using Mollusk in Tests
-
-For runtime CU measurement that matches on-chain behavior exactly, use Mollusk and print the `compute_units_consumed` field:
+**Runtime measurement** — actual CU consumed by the SVM. Exact match to on-chain behavior. Use QuasarSVM or Mollusk:
 
 ```rust
-use mollusk_svm::{program::keyed_account_for_system_program, Mollusk};
-use solana_account::Account;
-use solana_address::Address;
-use solana_instruction::Instruction;
-
-#[test]
-fn bench_deposit() {
-    let mollusk = Mollusk::new(&crate::ID, "target/deploy/my_program");
-    let (system_program, system_program_account) = keyed_account_for_system_program();
-
-    let user = Address::new_unique();
-    let user_account = Account::new(10_000_000_000, 0, &system_program);
-
-    let (vault, _bump) =
-        Address::find_program_address(&[b"vault", user.as_ref()], &crate::ID);
-    let vault_account = Account::new(0, 0, &system_program);
-
-    let instruction: Instruction = DepositInstruction {
-        user, vault, system_program,
-        amount: 1_000_000_000,
-    }.into();
-
-    let result = mollusk.process_instruction(
-        &instruction,
-        &[
-            (user, user_account),
-            (vault, vault_account),
-            (system_program, system_program_account),
-        ],
-    );
-
-    assert!(result.program_result.is_ok());
-
-    println!("\n========================================");
-    println!("  DEPOSIT CU: {}", result.compute_units_consumed);
-    println!("========================================\n");
-}
+let result = svm.process_instruction(&instruction, &accounts);
+result.assert_success();
+println!("CU: {}", result.compute_units_consumed);
 ```
 
-Run with `--nocapture` to see the output:
-
-```bash
-cargo test bench_deposit -- --nocapture
-```
-
-### Static vs Runtime CU
-
-The static profiler and runtime measurement may differ slightly:
-
-| Method | Measures | Accuracy |
-|--------|----------|----------|
-| `quasar profile` | Instruction count via `.text` section walk | Slightly higher (counts all instructions in the binary) |
-| Mollusk `compute_units_consumed` | Actual CU consumed by the SVM | Exact match to on-chain |
-
-The static profiler may report higher numbers because it counts every instruction in the `.text` section -- including functions that are never reached at runtime, and branches within reached functions that are never taken. For precise CU counts matching on-chain behavior, use Mollusk.
-
-Both methods are useful: the profiler for fast iteration and per-function breakdown, Mollusk for exact on-chain-matching numbers.
-
-## Comparing Against On-Chain Programs
-
-The `--diff` flag opens the diff view for comparing profiles:
-
-```bash
-quasar profile --diff <PROGRAM_NAME>
-```
-
-This is useful for:
-
-- **Pre-deployment validation** -- Verify your new version does not regress CU usage before deploying
-- **Competitive analysis** -- Compare your program's CU efficiency against similar deployed programs
-- **Upgrade planning** -- See exactly which functions changed and by how much
-
-The diff prints a flamegraph URL and starts a blocking server. Open the URL to see the overlay view highlighting regressions in red and improvements in green. Press Ctrl-C to stop the server.
-
-## Tracking CU Over Time
-
-The profiler automatically tracks changes between runs. Each `quasar profile` invocation:
-
-1. Loads the previous profile from `target/profile/.last-profile.<program>`
-2. Computes per-function deltas
-3. Displays regressions and improvements
-4. Saves the current profile as the new baseline
-
-This means you get automatic CU regression detection as part of your normal development workflow. No additional setup or CI configuration is needed.
-
-For CI integration, you can parse the profiler output or read the JSON profile files programmatically:
-
-```bash
-# Profile and check total CU is under budget
-quasar profile
-```
+Both are useful: the profiler for fast iteration and hotspot identification, runtime for precise on-chain-matching numbers.
 
 ## Optimization Checklist
 
-Based on profiling data from real Quasar programs, the biggest CU savings typically come from:
+**Inline instruction handlers** — `#[inline(always)]` on handlers (the default in scaffolded code). Removing it can add 50-100 CU.
 
-### 1. Inline Instruction Handlers
+**Minimize CPI** — each cross-program invocation has fixed overhead. When you own the accounts, direct lamport manipulation is cheaper than a system program transfer.
 
-Ensure your instruction handlers use `#[inline(always)]`:
+**Store bumps** — `find_program_address` searches for the bump (expensive). If the bump is stored in the account, use `bump = expr` to verify it directly (cheap).
 
-```rust
-impl<'info> Deposit<'info> {
-    #[inline(always)]
-    pub fn deposit(&self, amount: u64) -> Result<(), ProgramError> {
-        self.system_program
-            .transfer(self.user, self.vault, amount)
-            .invoke()
-    }
-}
-```
-
-The Quasar scaffolder adds this by default. Removing it can add 50-100 CU per instruction.
-
-### 2. Minimize CPI Calls
-
-Each cross-program invocation has a fixed overhead. If you are making multiple transfers, consider whether they can be batched or replaced with direct lamport manipulation:
-
-```rust
-// Expensive: CPI to system program
-self.system_program.transfer(self.source, self.dest, amount).invoke()
-
-// Cheaper: direct lamport manipulation (when you own the accounts)
-let source = self.source.to_account_view();
-let dest = self.dest.to_account_view();
-set_lamports(source, source.lamports() - amount);
-set_lamports(dest, dest.lamports() + amount);
-```
-
-### 3. Reduce PDA Derivations
-
-PDA derivation (`find_program_address`) is expensive. If the bump is stored in the account, use `create_program_address` with the known bump instead of searching for it.
-
-### 4. Use `--expand` to Find Hotspots
+**Use `--expand` and `--watch`** — find the widest bars in the flamegraph, optimize them, and catch regressions as you edit:
 
 ```bash
-quasar profile --expand
+quasar profile --watch --expand
 ```
-
-The expanded view shows every function with a bar chart and percentage. Focus optimization efforts on the widest bars -- they have the highest CU impact.
-
-### 5. Profile Before and After
-
-Always profile before and after making changes:
-
-```bash
-quasar profile          # baseline
-# ... make changes ...
-quasar profile          # see delta
-```
-
-The profiler will show exactly which functions got faster or slower, making it easy to validate that an optimization had the intended effect.

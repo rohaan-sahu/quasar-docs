@@ -93,9 +93,31 @@ A minimal panic handler that logs `"PANIC"` on-chain.
 
 ## Allocator Configuration
 
-By default, `#[program]` installs a global allocator that panics on any allocation attempt. Most programs never need heap allocation.
+By default, `#[program]` installs a global allocator that panics on any allocation attempt. Most programs never need heap allocation because Quasar provides zero-copy alternatives for dynamic data:
 
-If your program requires heap allocation (e.g., `alloc::vec::Vec` or `alloc::string::String`), enable the `alloc` feature:
+**`String<'a, MAX>`** and **`Vec<'a, T, MAX>`** -- stored inline in account data with a length prefix, accessed as `&str` and `&[T]` slices. No allocation, no deserialization:
+
+```rust
+#[account(discriminator = 1)]
+pub struct MultisigConfig<'a> {
+    pub creator: Address,
+    pub threshold: u8,
+    pub label: String<'a, 32>,         // max 32 bytes
+    pub signers: Vec<'a, Address, 10>, // max 10 elements
+}
+```
+
+If you only have **one** dynamic field and it's the last field in the struct, use a bare `&'a str` or `&'a [u8]` instead. This avoids the length prefix entirely -- the field consumes all remaining bytes in the account, which is slightly more efficient:
+
+```rust
+#[account(discriminator = 1)]
+pub struct Note<'a> {
+    pub author: Address,
+    pub content: &'a str, // tail field -- no prefix, uses remaining space
+}
+```
+
+If your program genuinely requires heap allocation, enable the `alloc` feature:
 
 ```toml
 [dependencies]
@@ -119,24 +141,6 @@ Account 'escrow' (index 1): must be writable, no duplicates
 ```
 
 Without `--debug`, these log statements are compiled out. Always build without `--debug` for production deployments.
-
-## The `#![no_std]` Requirement
-
-Quasar programs are `#![no_std]`. `prelude::*` provides:
-
-- `ProgramError`, `Address`, `AccountView` -- core Solana types
-- `address!`, `declare_id!` -- address construction macros
-- `Ctx`, `CtxWithRemaining`, `Context` -- instruction context types
-- `Account`, `Signer`, `UncheckedAccount`, `SystemAccount`, `Program`, `Interface`, `Sysvar` -- account wrappers
-- `System`, `SYSTEM_PROGRAM_ID` -- system program marker type and address
-- `Rent`, `Clock` -- sysvar types
-- `String`, `Vec`, `RawEncoded` -- dynamic field marker types
-- `PodU64`, `PodU32`, `PodU16`, `PodI64`, etc. -- alignment-1 integer types
-- `ParseAccounts`, `AccountCount`, `AsAccountView`, `Discriminator`, `Owner`, `Space`, `Id`, `Event` -- framework traits
-- `Deref`, `DerefMut` -- re-exported from `core::ops`
-- `emit!`, `require!`, `require_eq!`, `require_keys_eq!` -- utility macros
-- `log` -- logging function
-- `Seed` -- CPI seed type
 
 ## Instruction Handler Pattern
 

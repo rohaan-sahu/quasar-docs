@@ -3,20 +3,14 @@ title: IDL Generation
 description: How Quasar generates program interface descriptions and client code from your Rust source.
 ---
 
-The IDL is a JSON file describing your program's interface: instructions, accounts, events, types, and errors. Generated from your Rust source, it drives TypeScript and Rust client generation.
+The IDL is a JSON file describing your program's interface -- instructions, accounts, events, types, and errors. Generated from your Rust source by the CLI, it drives TypeScript and Rust client generation, and is consumed by [`declare_program!`](./cpi#declare_program) for typed CPI at compile time.
 
 ## What the IDL Contains
-
-Top-level structure:
 
 ```json
 {
   "address": "22222222222222222222222222222222222222222222",
-  "metadata": {
-    "name": "quasar_escrow",
-    "version": "0.1.0",
-    "spec": "0.1.0"
-  },
+  "metadata": { "name": "quasar_escrow", "version": "0.1.0", "spec": "0.1.0" },
   "instructions": [ ... ],
   "accounts": [ ... ],
   "events": [ ... ],
@@ -27,7 +21,7 @@ Top-level structure:
 
 ### Instructions
 
-Each instruction includes name, discriminator bytes, accounts with flags, and typed arguments:
+Each instruction includes its name, discriminator bytes, accounts with flags, and typed arguments:
 
 ```json
 {
@@ -42,11 +36,8 @@ Each instruction includes name, discriminator bytes, accounts with flags, and ty
       ]
     }},
     { "name": "mintA" },
-    { "name": "mintB" },
     { "name": "makerTaA", "writable": true },
-    { "name": "makerTaB", "writable": true },
     { "name": "vaultTaA", "writable": true },
-    { "name": "rent", "address": "SysvarRent111111111111111111111111111111111" },
     { "name": "tokenProgram", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
     { "name": "systemProgram", "address": "11111111111111111111111111111111" }
   ],
@@ -57,35 +48,16 @@ Each instruction includes name, discriminator bytes, accounts with flags, and ty
 }
 ```
 
-PDA seeds are encoded as `const` (literal bytes) or `account` (reference to another account). `writable` and `signer` flags appear only when `true`. Known program addresses are included as `address` fields. `CtxWithRemaining` instructions set `hasRemaining: true`.
+- PDA seeds are encoded as `const` (literal bytes) or `account` (reference to another account)
+- `writable` and `signer` flags appear only when `true`
+- Known program addresses are included as `address` fields
+- Instructions using `CtxWithRemaining` set `hasRemaining: true`
 
-### Accounts
-
-Each `#[account]` struct lists its discriminator:
-
-```json
-{
-  "name": "Escrow",
-  "discriminator": [1]
-}
-```
-
-### Events
-
-Same pattern as accounts:
-
-```json
-{
-  "name": "MakeEvent",
-  "discriminator": [0]
-}
-```
-
-Event discriminators are prefixed with `0xFF` on-chain to distinguish them from instructions. See [CPI](./cpi) for event emission details.
+Accounts and events each list their name and discriminator. Event discriminators are prefixed with `0xFF` on the wire to distinguish them from instructions.
 
 ### Types
 
-Struct types referenced by instructions or accounts:
+Struct types referenced by instructions or accounts. The only non-obvious mapping is `pubkey` for `Address` -- everything else (`u8`, `u64`, `bool`, etc.) maps directly to its Rust equivalent:
 
 ```json
 {
@@ -95,8 +67,6 @@ Struct types referenced by instructions or accounts:
     "fields": [
       { "name": "maker", "type": "pubkey" },
       { "name": "mintA", "type": "pubkey" },
-      { "name": "mintB", "type": "pubkey" },
-      { "name": "makerTaB", "type": "pubkey" },
       { "name": "receive", "type": "u64" },
       { "name": "bump", "type": "u8" }
     ]
@@ -104,9 +74,7 @@ Struct types referenced by instructions or accounts:
 }
 ```
 
-#### Dynamic Field Types
-
-Dynamic fields have dedicated IDL representations:
+Dynamic fields have dedicated representations:
 
 ```json
 { "name": "label", "type": { "string": { "maxLength": 32 } } }
@@ -114,87 +82,53 @@ Dynamic fields have dedicated IDL representations:
 { "name": "data", "type": { "tail": { "element": "u8" } } }
 ```
 
-- **`string`**: Maps to `String<P, MAX>` in Rust (e.g., `String<u8, 32>`). Includes the maximum byte length.
-- **`vec`**: Maps to `Vec<T, P, MAX>` (e.g., `Vec<Address, u32, 10>`). Includes the item type and maximum element count.
-- **`tail`**: Maps to a bare `&[u8]` or `&str` in Rust. Trailing data with no length prefix.
+| IDL | Rust | Description |
+|-----|------|-------------|
+| `string` | `String<'a, MAX>` | Length-prefixed string with max byte count |
+| `vec` | `Vec<'a, T, MAX>` | Length-prefixed array with max element count |
+| `tail` | `&'a [u8]` / `&'a str` | Trailing data, no length prefix |
 
 ### Errors
 
-`#[error_code]` variants are numbered from 0 by default (or from a custom base if the first variant specifies one). Framework errors (`QuasarError`) start at 3000.
+`#[error_code]` variants are offset by 6000. Framework errors (`QuasarError`) start at 3000:
 
 ```json
-{
-  "code": 6000,
-  "name": "InvalidAmount",
-  "msg": "Invalid amount"
-}
+{ "code": 6000, "name": "InvalidAmount", "msg": "Invalid amount" }
 ```
 
-## Supported Primitive Types
-
-Primitive types map directly to Rust:
-
-| IDL Type | Rust Type | Size |
-|----------|-----------|------|
-| `u8` | `u8` | 1 byte |
-| `i8` | `i8` | 1 byte |
-| `bool` | `bool` | 1 byte |
-| `u16` | `u16` | 2 bytes |
-| `i16` | `i16` | 2 bytes |
-| `u32` | `u32` | 4 bytes |
-| `i32` | `i32` | 4 bytes |
-| `u64` | `u64` | 8 bytes |
-| `i64` | `i64` | 8 bytes |
-| `u128` | `u128` | 16 bytes |
-| `i128` | `i128` | 16 bytes |
-| `pubkey` | `Address` | 32 bytes |
-
 ## Generating the IDL
-
-Generate the IDL and client code:
 
 ```bash
 quasar idl path/to/program
 ```
 
-### Output Structure
+### Output structure
 
 ```
 target/
   idl/
-    my_program.idl.json              # The IDL JSON file
+    my_program.idl.json
   client/
     typescript/
       my_program/
-        web3.ts                      # TypeScript client (web3.js v2)
-        kit.ts                       # TypeScript client (@solana/kit)
-        package.json                 # npm package manifest
+        web3.ts                      # @solana/web3.js v2
+        kit.ts                       # @solana/kit
+        package.json
     rust/
       my-program-client/
-        Cargo.toml                   # Standalone Rust crate
-        src/
-          lib.rs                     # Typed instruction builders
+        Cargo.toml
+        src/lib.rs                   # Typed instruction builders
 ```
 
-### TypeScript Clients
+### TypeScript clients
 
-- **`web3.ts`**: Uses `@solana/web3.js` v2.
-- **`kit.ts`**: Uses `@solana/kit`.
+Two flavors generated from the same IDL -- one for `@solana/web3.js` v2, one for `@solana/kit`. Both include typed instruction builders, account/event type definitions, discriminator constants, and codec functions.
 
-Both include typed instruction builders, account/event type definitions, discriminator constants, and codec functions.
-
-### Rust Client
+### Rust client
 
 A standalone crate with typed `Instruction` builders. Each instruction struct implements `From<T> for Instruction`:
 
 ```rust
-pub struct DepositInstruction {
-    pub user: Address,
-    pub vault: Address,
-    pub system_program: Address,
-    pub amount: u64,
-}
-
 let ix: Instruction = DepositInstruction {
     user: user_pubkey,
     vault: vault_pda,
@@ -203,22 +137,8 @@ let ix: Instruction = DepositInstruction {
 }.into();
 ```
 
-## Compile-Time IDL Consumption with declare_program!
-
-`declare_program!` consumes an IDL JSON at compile time to generate typed CPI helpers:
-
-```rust
-declare_program!(vault_program, "target/idl/quasar_vault.idl.json");
-```
-
-See [CPI](./cpi) for the generated module structure.
-
-## Discriminator Collision Detection
-
-All instruction discriminators must be unique and have the same byte length (enforced at compile time). Event discriminators occupy a separate namespace (prefixed with `0xFF`) and do not conflict with instructions.
-
 ## Next Steps
 
-- [Program Structure](./program-structure) — how the `#[program]` macro generates the dispatch table
-- [Instructions](./instructions) — discriminators and argument handling
-- [CPI](./cpi) — using `declare_program!` for typed cross-program calls
+- [Program Structure](./program-structure) -- how the `#[program]` macro generates the dispatch table
+- [Instructions](./instructions) -- discriminators and argument handling
+- [CPI](./cpi) -- `declare_program!` for typed cross-program calls

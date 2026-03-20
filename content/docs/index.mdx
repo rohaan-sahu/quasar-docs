@@ -1,48 +1,132 @@
 ---
 title: Quasar
-description: Build safe, high-performance Solana programs.
+description: Zero-copy, zero-allocation Solana program framework.
 ---
 
-Quasar is a Solana program framework for building safe, high-performance programs. It combines zero-copy account access, zero-allocation dispatch, and derive macros for accounts, instructions, and constraints -- so you get the performance of hand-written code with the ergonomics of `#[program]`, `#[account]`, and `#[derive(Accounts)]`.
+Quasar is a Solana program framework. Programs are `#![no_std]` by default -- accounts are pointer-cast directly from the SVM input buffer with no deserialization, no heap allocation, and no copies. You write `#[program]`, `#[account]`, and `#[derive(Accounts)]` like Anchor, but the generated code compiles down to near-hand-written CU efficiency.
 
-## Get started
+A standard vault program costs **2,816 CU** for deposit -- 17 CU *less* than raw Pinocchio, roughly half of Anchor.
+
+## Get Started
 
 <Cards>
   <Card title="Installation" href="/docs/getting-started/installation">
-    Install the Quasar CLI and set up your development environment.
+    Install from source, pick a toolchain (Solana or upstream), configure your editor.
   </Card>
   <Card title="Quickstart" href="/docs/getting-started/quickstart">
-    Create, build, test, and deploy your first Quasar program.
+    Scaffold with `quasar init`, build, test, deploy. Add instructions with `quasar add`.
   </Card>
   <Card title="Migrating from Anchor" href="/docs/getting-started/migrating-from-anchor">
-    Side-by-side code comparisons for every Anchor concept.
+    Same macros, different runtime. Side-by-side mapping of every Anchor concept.
   </Card>
 </Cards>
 
-## Learn the concepts
+## Core Concepts
 
 <Cards>
   <Card title="Program Structure" href="/docs/core-concepts/program-structure">
-    How `#[program]` generates your entrypoint, dispatch, and allocator.
+    `#[program]` generates entrypoint, dispatch table, event authority, and allocator.
   </Card>
   <Card title="Accounts & Validation" href="/docs/core-concepts/accounts-and-validation">
-    Account types, constraints, initialization, closing, and reallocation.
+    Zero-copy account types, constraints, initialization, closing, reallocation.
   </Card>
-  <Card title="Cross-Program Invocation" href="/docs/core-concepts/cpi">
-    Stack-allocated CPI with const-generic `CpiCall`.
+  <Card title="Instructions" href="/docs/core-concepts/instructions">
+    Discriminators, zero-copy argument parsing, `Ctx<T>`, return data.
+  </Card>
+  <Card title="PDAs" href="/docs/core-concepts/pda">
+    Custom PDA implementation. Seed expressions, bump storage, compile-time derivation.
+  </Card>
+  <Card title="CPI" href="/docs/core-concepts/cpi">
+    Method-style calls: `.transfer(...).invoke()`. System, Token, PDA signing, `declare_program!`, events.
+  </Card>
+  <Card title="IDL" href="/docs/core-concepts/idl">
+    JSON IDL generation from source. Powers typed clients and `declare_program!` cross-program calls.
   </Card>
 </Cards>
 
-## Build something
+## SPL Tokens
+
+<Cards>
+  <Card title="Token Program" href="/docs/spl-tokens/token-program">
+    Zero-copy Token/Mint types, typed CPI (`transfer`, `mint_to`, `burn`), declarative init, `TokenClose`.
+  </Card>
+  <Card title="Token-2022 & Interfaces" href="/docs/spl-tokens/token-2022">
+    `InterfaceAccount<T>` and `Interface<TokenInterface>` for programs that accept either token program.
+  </Card>
+  <Card title="Associated Token Accounts" href="/docs/spl-tokens/associated-token-accounts">
+    Declarative ATA initialization, validation, and address derivation helpers.
+  </Card>
+</Cards>
+
+## Clients & Testing
+
+<Cards>
+  <Card title="TypeScript Client" href="/docs/clients/typescript">
+    Auto-generated web3.js and Kit clients with instruction builders, account decoders, PDA helpers.
+  </Card>
+  <Card title="Rust Client" href="/docs/clients/rust">
+    Inline `client` module and standalone crate -- typed instruction builders for tests and scripts.
+  </Card>
+  <Card title="Testing" href="/docs/clients/testing">
+    QuasarSVM for Rust and TypeScript (SPL programs included), plus Mollusk for fast single-instruction tests.
+  </Card>
+</Cards>
+
+## Profiling & Performance
+
+<Cards>
+  <Card title="CU Profiler" href="/docs/profiling/cu-profiler">
+    Static sBPF analysis with per-function breakdown, delta tracking, and `--watch` mode.
+  </Card>
+  <Card title="Flamegraphs" href="/docs/profiling/flamegraphs">
+    Interactive viewer for visualizing where compute units are spent.
+  </Card>
+  <Card title="Benchmarks" href="/docs/profiling/benchmarks">
+    Framework comparison and optimization checklist.
+  </Card>
+</Cards>
+
+## Guides
 
 <Cards>
   <Card title="Build a Vault" href="/docs/guides/build-a-vault">
-    End-to-end guide: deposit and withdraw SOL with PDA signing.
+    Deposit and withdraw SOL with PDA signing.
   </Card>
   <Card title="Build an Escrow" href="/docs/guides/build-an-escrow">
-    Token swap escrow with SPL CPI, events, and account closing.
+    Token swap with SPL CPI, events, and account closing.
   </Card>
   <Card title="Build a Multisig" href="/docs/guides/build-a-multisig">
     Dynamic signers, remaining accounts, and threshold logic.
+  </Card>
+</Cards>
+
+## Deep Dives
+
+<Cards>
+  <Card title="Pod Types" href="/docs/zero-copy/pod-types">
+    How `#[account]` hotswaps `u64` → `PodU64` at compile time for alignment-1 zero-copy access.
+  </Card>
+  <Card title="Account Layout" href="/docs/zero-copy/account-layout">
+    The `#[repr(C)]` companion struct, view type, and generated trait implementations.
+  </Card>
+  <Card title="Dynamic Fields" href="/docs/zero-copy/dynamic-fields">
+    `String<'a, MAX>` and `Vec<'a, T, MAX>` -- length-prefixed fields stored inline in account data.
+  </Card>
+</Cards>
+
+## References
+
+<Cards>
+  <Card title="Account Types" href="/docs/references/account-types">
+    `Signer`, `Account<T>`, `Program<T>`, `UncheckedAccount`, `SystemAccount`, `Sysvar<T>`.
+  </Card>
+  <Card title="Account Constraints" href="/docs/references/account-constraints">
+    `seeds`, `bump`, `has_one`, `constraint`, `init`, `close`, `realloc`, and more.
+  </Card>
+  <Card title="CLI Reference" href="/docs/references/cli">
+    Every `quasar` subcommand and flag.
+  </Card>
+  <Card title="Configuration" href="/docs/references/configuration">
+    `Quasar.toml` settings.
   </Card>
 </Cards>

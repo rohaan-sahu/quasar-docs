@@ -1,70 +1,11 @@
 ---
 title: Dynamic Fields
-description: Working with variable-length data like strings and vectors in zero-copy accounts.
+description: Variable-length strings and vectors stored inline in account data, zero-copy.
 ---
 
-Dynamic fields -- variable-length strings and arrays -- use **marker types** that expand into length-prefixed wire formats. They must come **after** all fixed fields in the struct.
+Fixed-size accounts cover most use cases, but sometimes you need variable-length data -- a label, a list of signers, a chunk of arbitrary bytes. Quasar provides `String<'a, MAX>` and `Vec<'a, T, MAX>` as zero-copy dynamic fields that live inline in account data with a length prefix. No heap allocation, no deserialization.
 
-## The marker types
-
-Two marker types in `quasar_lang::dynamic`:
-
-### `String<P, N>`
-
-A variable-length UTF-8 string stored inline in the account data.
-
-- `P` -- length prefix type (`u8`, `u16`, or `u32`). Determines how the byte length is encoded. Default: `u32`.
-- `N` -- maximum byte length. Validated at write time. Default: `1024`.
-
-The macro accepts multiple syntaxes:
-
-```rust
-pub name: String,                // u32 prefix, max 1024 bytes (all defaults)
-pub bio: String<u16, 4096>,      // u16 prefix, max 4096 bytes (explicit prefix)
-pub tag: String<u8, 32>,         // u8 prefix, max 32 bytes (explicit prefix)
-pub label: String<'a, 32>,       // u32 prefix, max 32 bytes (lifetime first, prefix defaults to u32)
-```
-
-`String<'a, N>` places the struct's lifetime first and defaults the prefix to `u32`. This is the common form in `#[account]` structs.
-
-Wire format: `[prefix: P bytes] [utf-8 data: len bytes]`. The prefix encodes the **byte length** (not the character count).
-
-### `Vec<T, P, N>`
-
-A variable-length array of fixed-size elements stored inline in the account data.
-
-- `T` -- element type. Must be fixed-size with alignment 1 (e.g., `Address`, `PodU64`).
-- `P` -- count prefix type (`u8`, `u16`, or `u32`). Determines how the element count is encoded. Default: `u32`.
-- `N` -- maximum element count. Validated at write time. Default: `8`.
-
-Like `String`, accepts a lifetime-first syntax:
-
-```rust
-pub signers: Vec<Address>,           // u32 prefix, max 8 elements (all defaults)
-pub scores: Vec<PodU64, u8, 4>,      // u8 prefix, max 4 elements (explicit prefix)
-pub tags: Vec<Address, u16, 100>,    // u16 prefix, max 100 elements (explicit prefix)
-pub signers: Vec<'a, Address, 10>,   // u32 prefix, max 10 elements (lifetime first)
-```
-
-Wire format: `[prefix: P bytes] [elements: count * size_of::<T>() bytes]`. The prefix encodes the **element count** (not byte length). Elements are packed contiguously with no padding. A compile-time assertion enforces alignment 1 on `T`.
-
-## Borsh compatibility
-
-The default prefix type for both `String` and `Vec` is `u32`, which matches the Borsh serialization format. If your account data needs to be read by clients or other programs that expect Borsh encoding, use the defaults:
-
-```rust
-pub name: String,        // u32 prefix -- Borsh-compatible
-pub items: Vec<Address>, // u32 prefix -- Borsh-compatible
-```
-
-For programs that do not need Borsh compatibility, smaller prefixes save space:
-
-```rust
-pub name: String<u8, 32>,        // 1-byte prefix saves 3 bytes
-pub items: Vec<Address, u8, 10>, // 1-byte prefix saves 3 bytes
-```
-
-## Example: multisig config
+## String and Vec
 
 ```rust
 #[account(discriminator = 1)]
@@ -72,209 +13,95 @@ pub struct MultisigConfig<'a> {
     pub creator: Address,
     pub threshold: u8,
     pub bump: u8,
-    pub label: String<'a, 32>,
-    pub signers: Vec<'a, Address, 10>,
+    pub label: String<'a, 32>,         // max 32 bytes
+    pub signers: Vec<'a, Address, 10>, // max 10 elements
 }
 ```
 
-Structs with dynamic fields **must** have a lifetime parameter -- the generated accessors return borrowed references (`&str`, `&[Address]`) into the account data buffer.
+Structs with dynamic fields need a lifetime parameter -- the generated accessors return borrowed references (`&str`, `&[Address]`) pointing directly into the account data buffer.
 
-### Wire format
+Each dynamic field is stored with a length prefix (default `u32`, Borsh-compatible) followed by the data:
 
 ```
-Offset     Size         Field
-------     ----         -----
-0          1            discriminator (0x01)
-1          32           creator: Address
-33         1            threshold: u8
-34         1            bump: u8
-35         4            label length prefix (u32, little-endian)
-39         0..32        label UTF-8 data
-39+L       4            signers count prefix (u32, little-endian)
-43+L       0..320       signers data (up to 10 * 32 bytes)
+Offset     Field
+------     -----
+0          discriminator (0x01)
+1          creator: Address (32 bytes)
+33         threshold: u8
+34         bump: u8
+35         label length prefix (u32 LE)
+39         label UTF-8 data (0..32 bytes)
+39+L       signers count prefix (u32 LE)
+43+L       signers data (0..320 bytes)
 ```
 
-Where `L` is the actual byte length of the label string.
-
-`Space` reports the **minimum** space (all dynamic fields empty):
-
-```rust
-impl Space for MultisigConfig<'_> {
-    const SPACE: usize = 1       // discriminator
-        + size_of::<MultisigConfigZc>()  // fixed fields (34 bytes)
-        + 4                      // label prefix
-        + 4;                     // signers prefix
-    // = 43 bytes minimum
-}
-```
-
-The companion struct contains only the fixed fields:
-
-```rust
-#[repr(C)]
-pub struct MultisigConfigZc {
-    pub creator: Address,   // 32 bytes
-    pub threshold: u8,      // 1 byte
-    pub bump: u8,           // 1 byte
-}
-```
-
-`MIN_SPACE` and `MAX_SPACE` are also available:
-
-```rust
-MultisigConfig::MIN_SPACE  // 43 bytes (all dynamic fields empty)
-MultisigConfig::MAX_SPACE  // 43 + 32 + 10 * 32 = 395 bytes (all fields at max)
-```
-
-## Ordering restriction: fixed fields first
-
-Dynamic fields must come **after** all fixed fields. This is enforced at compile time:
-
-```rust
-// This compiles:
-pub struct Valid<'a> {
-    pub owner: Address,           // fixed
-    pub balance: u64,             // fixed
-    pub name: String<'a, 32>,    // dynamic -- after all fixed fields
-}
-
-// This does NOT compile:
-pub struct Invalid<'a> {
-    pub owner: Address,           // fixed
-    pub name: String<'a, 32>,    // dynamic
-    pub balance: u64,             // ERROR: fixed field after dynamic field
-}
-```
-
-The error message is: `fixed fields must precede all dynamic fields (String/Vec)`.
-
-Dynamic fields are accessed by walking length prefixes from the end of the fixed-field header, so they must be contiguous at the tail.
-
-## No nested dynamic types
-
-Vec element types must be fixed-size. Nested dynamic types are not supported:
-
-```rust
-// This does NOT compile:
-pub items: Vec<String>,           // ERROR: nested dynamic type
-pub nested: Vec<Vec<Address>>,    // ERROR: nested dynamic type
-```
-
-The compiler rejects this with: `Vec element type must be a fixed-size type; nested dynamic types (String/Vec) are not supported`.
+For `String`, the prefix is the byte length. For `Vec`, it's the element count. Elements must have alignment 1 (enforced at compile time).
 
 ## Reading dynamic fields
 
-The macro generates typed accessors for each dynamic field:
+The macro generates typed accessors:
 
 ```rust
-impl MultisigConfig<'_> {
-    // Returns &str -- borrows from the account data buffer
-    pub fn label(&self) -> &str { ... }
-
-    // Returns &[Address] -- borrows from the account data buffer
-    pub fn signers(&self) -> &[Address] { ... }
-}
-```
-
-These accessors are O(1). Example:
-
-```rust
-pub fn verify_and_transfer(
-    &self,
-    amount: u64,
-    bumps: &ExecuteTransferBumps,
-    remaining: RemainingAccounts,
-) -> Result<(), ProgramError> {
-    let stored_signers = self.config.signers();
-    let threshold = self.config.threshold;
-
-    let mut approvals = 0u32;
-    for account in remaining.iter() {
-        let account = account?;
-        if !account.is_signer() {
-            continue;
-        }
-        let addr = account.address();
-        for stored in stored_signers {
-            if addr == stored {
-                approvals = approvals.wrapping_add(1);
-                break;
-            }
-        }
-    }
-
-    if approvals < threshold as u32 {
-        return Err(ProgramError::MissingRequiredSignature);
-    }
-    // ... transfer logic
-}
-```
-
-Raw accessors (`label_raw()`, `signers_raw()`) return `RawEncoded` -- the prefix + data bytes for zero-copy CPI pass-through without decode/re-encode.
-
-## Writing dynamic fields
-
-Each dynamic field gets a setter method: `set_label()`, `set_signers()`, etc.
-
-### Writing during initialization
-
-`set_inner` writes all fields at once, taking a payer and optional rent reference for reallocation:
-
-```rust
-self.config.set_inner(
-    *self.creator.address(),    // creator: Address
-    threshold,                   // threshold: u8
-    bumps.config,               // bump: u8
-    "",                          // label: &str (empty initially)
-    signers,                     // signers: &[Address]
-    self.creator.to_account_view(),  // payer
-    Some(&**self.rent),         // rent
-)
-```
-
-### Writing individual fields after initialization
-
-Individual setters handle reallocation automatically, shifting trailing fields as needed:
-
-```rust
-pub fn update_label(&mut self, label: &str) -> Result<(), ProgramError> {
-    self.config.set_label(self.creator, label)
-}
-```
-
-Exceeding the maximum length returns `QuasarError::DynamicFieldTooLong`.
-
-## Mutable access to Vec elements
-
-Vec fields also generate a `_mut()` accessor for in-place modification:
-
-```rust
-// Read-only access
+let label: &str = self.config.label();
 let signers: &[Address] = self.config.signers();
+```
 
-// Mutable access (in-place modification, no realloc)
+Vec fields also get a mutable accessor for in-place modification without reallocation:
+
+```rust
 let signers_mut: &mut [Address] = self.config.signers_mut();
 signers_mut[0] = new_address;
 ```
 
-This modifies elements in-place without changing the count. To change element count, use `set_signers()`.
+## Writing dynamic fields
 
-## AccountCheck for dynamic accounts
+`set_inner()` writes everything at once during initialization:
 
-`AccountCheck::check()` for dynamic accounts validates each length prefix, ensures length/count does not exceed the field's maximum, checks data region bounds, and verifies string data is valid UTF-8. This runs once during account parsing; after passing, all field accesses use cached offsets.
+```rust
+self.config.set_inner(
+    *self.creator.address(),
+    threshold,
+    bumps.config,
+    "",           // label: empty initially
+    signers,      // &[Address]
+    self.creator.to_account_view(),  // payer for realloc
+    Some(&**self.rent),
+)
+```
+
+Individual setters handle reallocation automatically after init:
+
+```rust
+self.config.set_label(self.creator, "new label")?;
+```
+
+Exceeding the `MAX` returns `QuasarError::DynamicFieldTooLong`.
+
+## Ordering rules
+
+Dynamic fields must come **after** all fixed fields. This is enforced at compile time -- dynamic fields are accessed by walking length prefixes from the end of the fixed-field header, so they must be contiguous at the tail.
+
+No nested dynamic types either: `Vec<String>` and `Vec<Vec<Address>>` won't compile.
 
 ## Tail fields
 
-**Tail fields** are `&str` or `&[u8]` references that consume all remaining account data after the fixed header and any prefixed dynamic fields. They have no length prefix; their length is implicitly `data_len - offset`.
+If you have exactly one dynamic field and it's the last field, you can skip the length prefix entirely with a bare `&'a str` or `&'a [u8]`. The field consumes all remaining bytes in the account:
 
 ```rust
 #[account(discriminator = 1)]
 pub struct Note<'a> {
     pub author: Address,
-    pub content: &'a str,    // tail -- consumes remaining bytes
+    pub content: &'a str,    // no prefix -- uses everything after `author`
 }
 ```
 
-Restrictions:
-- At most one tail field per struct (`at most one tail field (&str / &[u8]) is allowed per struct`).
-- The tail field must be the **last** field in the struct (`tail field (&str / &[u8]) must be the last field in the struct`).
+Slightly more efficient than `String<MAX>` since there's no prefix overhead, but limited to one field and it must be last.
+
+## Smaller prefixes
+
+The default `u32` prefix matches Borsh encoding. If you don't need Borsh compatibility, smaller prefixes save a few bytes:
+
+```rust
+pub name: String<u8, 32>,        // 1-byte prefix instead of 4
+pub items: Vec<Address, u8, 10>, // 1-byte prefix instead of 4
+```

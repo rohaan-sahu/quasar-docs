@@ -1,29 +1,22 @@
 ---
 title: CU Profiler
-description: Static compute unit analysis for Quasar programs.
+description: Static compute unit analysis with per-function breakdown and delta tracking.
 ---
 
-The CU profiler measures compute unit usage by statically walking every instruction in your compiled sBPF binary. Each sBPF instruction costs one compute unit, so the instruction count directly corresponds to CU usage.
+`quasar profile` statically walks every sBPF instruction in your compiled binary. Each instruction = one compute unit, so the count directly maps to CU usage. Function names are resolved via DWARF debug info.
 
-The profiler resolves function names via DWARF debug info and outputs a per-function breakdown sorted by cost, with optional delta tracking against the previous run.
-
-## Running the Profiler
+## Running It
 
 ```bash
-quasar profile
+quasar profile                              # auto-builds with debug symbols
+quasar profile target/deploy/my_program.so  # explicit ELF path
 ```
 
-Runs a profile build (with debug symbols) if needed, then profiles the binary. You can also pass an explicit ELF path:
+Debug symbols are required -- the profiler errors on stripped binaries. Use the unstripped binary from `target/sbf-solana-solana/release/` if needed.
 
-```bash
-quasar profile target/deploy/my_program.so
-```
+## Output
 
-Debug symbols are required. If you pass a stripped binary, the profiler exits with an error. Build with `quasar build --debug` or use the unstripped binary from `target/sbf-solana-solana/release/`.
-
-## Reading the Output
-
-On the first run, the profiler shows the top 5 functions by cost:
+First run shows the top 5 functions by cost:
 
 ```
   my_program  2,816 CU
@@ -34,14 +27,7 @@ On the first run, the profiler shows the top 5 functions by cost:
        116   4.1%  +3 more (--expand)
 ```
 
-Each line shows:
-- **CU count** -- Number of compute units attributed to that function
-- **Percentage** -- Share of total CU budget
-- **Function name** -- Simplified from the demangled Rust symbol
-
-## Tracking deltas
-
-The profiler saves a baseline after each run to `target/profile/.last-profile.<program>`. On subsequent runs, it shows deltas:
+On subsequent runs, the profiler loads the previous baseline from `target/profile/.last-profile.<program>` and shows deltas -- red `(+N)` for regressions, green `(-N)` for improvements:
 
 ```
   my_program  2,816 CU (+42)
@@ -49,85 +35,20 @@ The profiler saves a baseline after each run to `target/profile/.last-profile.<p
        800 (-158)   3.0%  Deposit::process
 ```
 
-- Red `(+N)` indicates a regression (more CU)
-- Green `(-N)` indicates an improvement (fewer CU)
-- The total delta appears next to the program name
+## Flags
 
-## `--expand`: Full function table
-
-Show every function with bar charts:
-
-```bash
-quasar profile --expand
-```
-
-Output:
+**`--expand`** — Full function table with bar charts:
 
 ```
   my_program  2,816 CU
      1,200  42.6%  ████████████████████  Initialize::verify
        800  28.4%  █████████████░░░░░░░  Deposit::process
        400  14.2%  ██████░░░░░░░░░░░░░░  entrypoint
-       300  10.6%  █████░░░░░░░░░░░░░░░  Withdraw::process
-        80   2.8%  █░░░░░░░░░░░░░░░░░░░  PDA::validate
-        36   1.3%  ░░░░░░░░░░░░░░░░░░░░  System::transfer
   6 functions, 2,816 CU total
 ```
 
-When a baseline exists, each function also shows its individual delta:
+**`--watch`** (`-w`) — Re-profiles on every source file change. Combine with `--expand` for a live CU dashboard.
 
-```
-     1,200  42.6%  ████████████████████  Initialize::verify (+200)
-```
+**`--diff <PROGRAM>`** — Opens the flamegraph diff view in the foreground. Press Ctrl-C to stop.
 
-## `--diff`: Compare profiles
-
-Compare profiles in the diff view:
-
-```bash
-quasar profile --diff <PROGRAM_NAME>
-```
-
-Prints a flamegraph URL with `&view=diff` and starts the server in the foreground. Press Ctrl-C to stop.
-
-## `--watch`: Continuous profiling
-
-Re-profiles on every source file change:
-
-```bash
-quasar profile --watch
-```
-
-Combine with `--expand` for a live CU dashboard:
-
-```bash
-quasar profile --watch --expand
-```
-
-## `--share`: Publish to GitHub Gist
-
-Upload the profile to a public GitHub Gist:
-
-```bash
-quasar profile --share
-```
-
-Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated. Skips starting the local flamegraph server.
-
-## Profile data format
-
-Each run generates a timestamped JSON file in `target/profile/profiles/`:
-
-```
-target/profile/profiles/my_program__2025-03-15-14-30-00-123.profile.json
-```
-
-The JSON contains the program name, version, binary hash (SHA-256), binary size, and a hierarchical frame tree for [flamegraph rendering](/docs/profiling/flamegraphs).
-
-## Tips for reducing CU
-
-- **Inline aggressively** -- Use `#[inline(always)]` on instruction handlers (the default in generated scaffolding).
-- **Minimize branching** -- Every branch adds instructions.
-- **Minimize CPI** -- Each cross-program invocation adds overhead.
-- **Use `--expand`** -- Find the costliest functions and focus there.
-- **Use `--watch`** -- Catch regressions as you edit.
+**`--share`** — Uploads the profile to a public GitHub Gist (requires `gh` CLI).

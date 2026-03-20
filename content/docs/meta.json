@@ -3,13 +3,11 @@
   "pages": [
     "getting-started",
     "core-concepts",
-    "zero-copy",
-    "features",
     "spl-tokens",
     "clients",
-    "testing",
     "profiling",
     "guides",
+    "zero-copy",
     "references"
   ]
 }

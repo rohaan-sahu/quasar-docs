@@ -1,13 +1,13 @@
 ---
-title: Token-2022
-description: Using the Token Extensions program with Quasar's interface abstraction.
+title: Token-2022 and Interfaces
+description: Supporting both SPL Token and Token-2022 with Quasar's interface abstraction.
 ---
 
-The Token-2022 program (also called Token Extensions) is a superset of the original SPL Token program, with the same base account layouts plus extensions like transfer fees, confidential transfers, and metadata pointers. Quasar provides dedicated types for Token-2022 and a unified interface abstraction that accepts either program.
+Token-2022 (Token Extensions) is a superset of SPL Token with the same base account layouts plus extensions like transfer fees and confidential transfers. Quasar supports it through dedicated types and a unified interface abstraction that accepts either program.
 
-## Token-2022 types
+## Dedicated Token-2022 Types
 
-`Token2022` and `Mint2022` work identically to `Token` and `Mint`, but validate that the account owner is the Token-2022 program:
+`Token2022` and `Mint2022` are identical to `Token` and `Mint` but validate that the owner is the Token-2022 program:
 
 ```rust
 use quasar_spl::{Token2022, Mint2022, TokenCpi};
@@ -19,23 +19,13 @@ pub struct Transfer2022<'info> {
     pub to: &'info mut Account<Token2022>,
     pub token_program: &'info Program<Token2022>,
 }
-
-impl<'info> Transfer2022<'info> {
-    pub fn handler(&self, amount: u64) -> Result<(), ProgramError> {
-        self.token_program
-            .transfer(self.from, self.to, self.authority, amount)
-            .invoke()
-    }
-}
 ```
 
-`Token2022` and `Mint2022` use the same `TokenAccountState` and `MintAccountState` zero-copy layouts. Extensions live after the base data and do not affect the prefix layout.
+Same zero-copy layouts, same CPI methods via `TokenCpi`. Use these when your program only supports Token-2022.
 
-Both `Program<Token2022>` and `Program<Token>` implement the `TokenCpi` trait, so all CPI methods are available: `transfer()`, `transfer_checked()`, `mint_to()`, `burn()`, `approve()`, `revoke()`, `close_account()`, and `sync_native()`.
+## Interface Types
 
-## InterfaceAccount
-
-When your program needs to accept token accounts from **either** SPL Token or Token-2022, use `InterfaceAccount<T>` instead of `Account<T>`:
+When your program should accept tokens from **either** SPL Token or Token-2022, use `InterfaceAccount<T>` for data accounts and `Interface<TokenInterface>` for the program:
 
 ```rust
 use quasar_spl::{InterfaceAccount, Token, TokenCpi, TokenInterface};
@@ -57,54 +47,27 @@ impl<'info> InterfaceTransfer<'info> {
 }
 ```
 
-`InterfaceAccount<Token>` validates that the account owner is either SPL Token or Token-2022, checks the data length, and for mutable references, verifies the account is writable.
+`InterfaceAccount<Token>` validates that the account is owned by either SPL Token or Token-2022. `Interface<TokenInterface>` accepts either program ID. The SVM routes the CPI to whichever program was passed in the transaction -- your code stays identical.
 
-Like `Account<T>`, it implements `Deref` and `DerefMut` to the underlying zero-copy type:
-
-```rust
-let balance = self.from.amount();
-let mint_addr = self.from.mint();
-```
-
-The same interface pattern works for mints:
+Works for mints too:
 
 ```rust
 pub mint: &'info InterfaceAccount<Mint>,
 ```
 
-## TokenInterface
-
-`Interface<TokenInterface>` is the program counterpart to `InterfaceAccount`. Where `Program<Token>` only accepts SPL Token, `Interface<TokenInterface>` accepts either:
-
-```rust
-pub token_program: &'info Interface<TokenInterface>,
-```
-
-`TokenCpi` is implemented for `Interface<TokenInterface>`, so all CPI methods work the same way:
-
-```rust
-self.token_program
-    .transfer(self.from, self.to, self.authority, amount)
-    .invoke()?;
-```
-
-The SVM routes the CPI to whichever program was passed in the transaction. Your instruction code stays identical regardless of which token program the user provides.
-
-## When to use which type
-
-Choose the right combination based on your program's requirements:
+## Choosing the Right Types
 
 | Scenario | Account type | Program type |
 |----------|-------------|-------------|
-| Only SPL Token support | `Account<Token>` / `Account<Mint>` | `Program<Token>` |
-| Only Token-2022 support | `Account<Token2022>` / `Account<Mint2022>` | `Program<Token2022>` |
-| Both programs supported | `InterfaceAccount<Token>` / `InterfaceAccount<Mint>` | `Interface<TokenInterface>` |
+| SPL Token only | `Account<Token>` / `Account<Mint>` | `Program<Token>` |
+| Token-2022 only | `Account<Token2022>` / `Account<Mint2022>` | `Program<Token2022>` |
+| Both programs | `InterfaceAccount<Token>` / `InterfaceAccount<Mint>` | `Interface<TokenInterface>` |
 
-If you have no reason to restrict to one token program, prefer `InterfaceAccount` + `TokenInterface`.
+If you have no reason to restrict to one program, prefer the interface types.
 
-## Token initialization with interfaces
+## Init with Interfaces
 
-The `token::mint` and `token::authority` attributes work with both direct types and interface types. The token program used for initialization is inferred from the program account in the struct:
+The `token::mint` and `token::authority` attributes work with interface types. The token program used for initialization is inferred from the program account in your struct:
 
 ```rust
 #[derive(Accounts)]
@@ -119,40 +82,9 @@ pub struct InitVault<'info> {
 }
 ```
 
-`InitToken` and `InitMint` accept any `&impl TokenCpi`, which is implemented by `Program<Token>`, `Program<Token2022>`, and `Interface<TokenInterface>`.
+## Migrating from Token to Interface
 
-## TokenClose with interfaces
-
-The `TokenClose` trait is implemented for all interface variants:
-
-```rust
-use quasar_spl::{InterfaceAccount, Token, TokenClose};
-
-// Works with InterfaceAccount just like Account
-self.vault.close(self.token_program, self.destination, self.authority)
-    .invoke_signed(&seeds)?;
-```
-
-## Extension compatibility
-
-The zero-copy types read the base token/mint data (the first 165 or 82 bytes). Token-2022 extensions are stored **after** the base data and do not affect `TokenAccountState` or `MintAccountState` fields.
-
-If you need to read extension data, you can access the raw account data through the `AccountView`:
-
-```rust
-let view = self.token_account.to_account_view();
-let raw_data = unsafe {
-    core::slice::from_raw_parts(view.data_ptr(), view.data_len())
-};
-// Extension data starts at offset 165 for token accounts
-// Parse extension-specific layouts as needed
-```
-
-For most use cases (transfers, minting, burning, closing), the base data and standard CPI methods are sufficient. Extensions are handled by the Token-2022 program during CPI execution.
-
-## Migrating from Token to Interface types
-
-To support both programs in an existing codebase, substitute the types:
+Swap the types -- no business logic changes needed:
 
 ```rust
 // Before: SPL Token only
@@ -164,4 +96,8 @@ pub from: &'info mut InterfaceAccount<Token>,
 pub token_program: &'info Interface<TokenInterface>,
 ```
 
-No changes to your business logic are needed. CPI method signatures are identical across all three program wrappers.
+CPI method signatures are identical across all three program wrappers.
+
+## Extensions
+
+The zero-copy types read the base token/mint data (first 165 or 82 bytes). Token-2022 extensions live after the base data and don't affect the standard field accessors. Extensions are handled by the Token-2022 program during CPI execution -- for most operations (transfers, minting, burning, closing), the base data and standard CPI methods are all you need.
