@@ -7,6 +7,8 @@ import {
 } from 'fumadocs-ui/page';
 import { notFound } from 'next/navigation';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
+import Image from 'next/image';
+import logoFull from '@/app/images/logo-full.webp';
 
 export default async function Page(props: {
   params: Promise<{ slug?: string[] }>;
@@ -17,9 +19,16 @@ export default async function Page(props: {
 
   const MDX = page.data.body;
 
+
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
-      <DocsTitle>{page.data.title}</DocsTitle>
+      <DocsTitle>
+        <div className='flex items-center gap-x-3'>
+          {page.url === "/docs" ? <Image src={logoFull} alt="Quasar" width={250} height={100} className='w-42' /> : (
+            page.data.title
+          )}
+        </div>
+      </DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
         <MDX components={{ ...defaultMdxComponents }} />
