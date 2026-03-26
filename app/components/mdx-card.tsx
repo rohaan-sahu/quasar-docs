@@ -53,6 +53,7 @@ function Card({
             alt={imageAlt ?? ''}
             fill
             quality={95}
+            loading="lazy"
             className="object-cover py-0! my-0!"
             draggable={false}
           />
