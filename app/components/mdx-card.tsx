@@ -39,7 +39,7 @@ function Card({
       {...props}
       data-card
       className={cx(
-        'block rounded-xl border bg-fd-card text-fd-card-foreground transition-colors @max-lg:col-span-full',
+        'group block rounded-xl border bg-fd-card text-fd-card-foreground transition-colors @max-lg:col-span-full',
         span === 2 && 'lg:col-span-2',
         image ? 'overflow-hidden p-0' : 'p-4',
         props.href && 'hover:bg-fd-accent/80',
@@ -54,7 +54,7 @@ function Card({
             fill
             quality={95}
             loading="lazy"
-            className="object-cover py-0! my-0!"
+            className="object-cover py-0! my-0! group-hover:scale-105 transition-transform duration-300 "
             draggable={false}
           />
         </div>
