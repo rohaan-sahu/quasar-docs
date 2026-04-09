@@ -1,7 +1,8 @@
 import { defineDocs, defineConfig } from 'fumadocs-mdx/config';
 import { remarkImage } from 'fumadocs-core/mdx-plugins';
-import type { Nodes, RootContent } from 'mdast';
+import type { Heading, Nodes, RootContent } from 'mdast';
 import type { MdxJsxFlowElement, MdxJsxTextElement } from 'mdast-util-mdx';
+import type { Info, State } from 'mdast-util-to-markdown';
 
 type MdxElement = MdxJsxFlowElement | MdxJsxTextElement;
 
@@ -11,6 +12,12 @@ export const docs = defineDocs({
     postprocess: {
       includeProcessedMarkdown: {
         headingIds: false,
+        handlers: {
+          heading(node: Heading, _parent: unknown, state: State, info: Info) {
+            const content = state.containerPhrasing(node, info);
+            return `${'#'.repeat(node.depth)} ${content}`;
+          },
+        },
         onStringify(node: Nodes) {
           if (!isMdxElement(node)) {
             return;
